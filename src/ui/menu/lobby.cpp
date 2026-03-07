@@ -1,0 +1,212 @@
+#include "ui/menu/lobby.h"
+#include <iostream>
+
+void LobbyScreen::setRooms(const std::vector<RoomInfo>& rooms) {
+    std::cerr << "[UI] LobbyScreen::setRooms input=" << rooms.size() << std::endl;
+    m_rooms = rooms;
+    if (m_roomSelected >= (int)m_rooms.size())
+        m_roomSelected = m_rooms.empty() ? 0 : (int)m_rooms.size() - 1;
+}
+
+void LobbyScreen::clearRooms() {
+    std::cerr << "[UI] LobbyScreen::clearRooms" << std::endl;
+    m_rooms.clear();
+    m_roomSelected = 0;
+    m_focus = 0;
+    m_buttonIdx = 0;
+    m_joinRoomId.clear();
+    m_joinNeedsPassword = false;
+    m_refreshRequested = false;
+}
+
+MenuResult LobbyScreen::update(InputState& input, int /*screenW*/, int /*screenH*/) {
+    auto p = consumePressFlags(input);
+
+    if (p.back) return MenuResult::Back;
+
+    if (m_focus == 0) {
+        // Room list
+        int count = (int)m_rooms.size();
+        if (p.up && count > 0) {
+            m_roomSelected--;
+            if (m_roomSelected < 0) m_roomSelected = count - 1;
+        }
+        if (p.down) {
+            if (count > 0 && m_roomSelected < count - 1) {
+                m_roomSelected++;
+            } else {
+                // At bottom of list (or empty list) — move to button bar
+                m_focus = 1;
+                m_buttonIdx = 0;
+            }
+        }
+        // Enter on room = join
+        if (p.confirm && count > 0 && m_roomSelected < count) {
+            const RoomInfo& room = m_rooms[m_roomSelected];
+            m_joinRoomId = room.roomId;
+            if (room.hasPassword) {
+                m_joinNeedsPassword = true;
+                return MenuResult::JoinGame; // main.cpp will show password screen
+            } else {
+                m_joinNeedsPassword = false;
+                return MenuResult::JoinGame;
+            }
+        }
+    } else {
+        // Button bar — left/right to navigate, up to return to room list
+        if (p.up) {
+            m_focus = 0;
+        }
+        if (p.left) { m_buttonIdx--; if (m_buttonIdx < 0) m_buttonIdx = 2; }
+        if (p.right) { m_buttonIdx++; if (m_buttonIdx > 2) m_buttonIdx = 0; }
+
+        if (p.confirm) {
+            switch (m_buttonIdx) {
+                case 0: return MenuResult::HostGame;
+                case 1: m_refreshRequested = true; return MenuResult::None;
+                case 2: return MenuResult::Back;
+            }
+        }
+    }
+
+    return MenuResult::None;
+}
+
+void LobbyScreen::render(int screenW, int screenH) const {
+    std::string output;
+    beginOutput(output, screenW, screenH);
+
+    int headerY = 2;
+    int usernameY = 4;
+    int columnHeaderY = 6;
+    int listStartY = 7;
+    int maxVisible = screenH - 14;
+    if (maxVisible < 3) maxVisible = 3;
+
+    int totalRooms = (int)m_rooms.size();
+
+    int scrollOffset = 0;
+    if (totalRooms > maxVisible) {
+        scrollOffset = m_roomSelected - maxVisible / 2;
+        if (scrollOffset < 0) scrollOffset = 0;
+        if (scrollOffset > totalRooms - maxVisible) scrollOffset = totalRooms - maxVisible;
+    }
+
+    const char* buttonLabels[] = { "[Host Game]", "[Refresh]", "[Back]" };
+    int buttonCount = 3;
+    int buttonY = screenH - 5;
+
+    for (int y = 0; y < screenH; y++) {
+        bool rendered = false;
+
+        if (y == headerY) {
+            renderCenteredText(output, "=== Online Lobby ===", screenW, TITLE_FG, BG);
+            rendered = true;
+        }
+
+        if (y == usernameY) {
+            std::string userLine = "Player: " + m_playerName;
+            renderCenteredText(output, userLine.c_str(), screenW, ACCENT_FG, BG);
+            rendered = true;
+        }
+
+        if (y == columnHeaderY) {
+            std::string header = "  Name                 Host           Players  Status  ";
+            int padLeft = (screenW - (int)header.size()) / 2;
+            if (padLeft < 0) padLeft = 0;
+
+            output += DETAIL_FG;
+            output += BG;
+            for (int x = 0; x < padLeft && x < screenW; x++) output += ' ';
+            for (int x = 0; x < (int)header.size() && (padLeft + x) < screenW; x++) output += header[x];
+            for (int x = padLeft + (int)header.size(); x < screenW; x++) output += ' ';
+            rendered = true;
+        }
+
+        // Room list
+        int listIdx = y - listStartY;
+        if (y >= listStartY && listIdx < maxVisible && (listIdx + scrollOffset) < totalRooms) {
+            int roomIdx = listIdx + scrollOffset;
+            const RoomInfo& room = m_rooms[roomIdx];
+            bool sel = (m_focus == 0 && roomIdx == m_roomSelected);
+
+            std::string nameStr = room.name;
+            if ((int)nameStr.size() > 20) nameStr = nameStr.substr(0, 17) + "...";
+            while ((int)nameStr.size() < 20) nameStr += ' ';
+
+            std::string hostStr = room.hostName;
+            if ((int)hostStr.size() > 14) hostStr = hostStr.substr(0, 11) + "...";
+            while ((int)hostStr.size() < 14) hostStr += ' ';
+
+            char playersBuf[16];
+            snprintf(playersBuf, sizeof(playersBuf), "%d/%d", room.playerCount, room.maxPlayers);
+            std::string playersStr = playersBuf;
+            while ((int)playersStr.size() < 8) playersStr += ' ';
+
+            std::string statusStr = room.hasPassword ? "Locked" : "Open";
+
+            std::string line = sel ? "> " : "  ";
+            line += nameStr + " " + hostStr + " " + playersStr + " " + statusStr;
+            while ((int)line.size() < 56) line += ' ';
+
+            int padLeft = (screenW - (int)line.size()) / 2;
+            if (padLeft < 0) padLeft = 0;
+
+            output += BG;
+            for (int x = 0; x < padLeft && x < screenW; x++) output += ' ';
+            output += (sel ? SELECTED_FG : NORMAL_FG);
+            output += (sel ? SELECTED_BG : BG);
+            output += line;
+            output += BG;
+            for (int x = padLeft + (int)line.size(); x < screenW; x++) output += ' ';
+            rendered = true;
+        }
+
+        // "No rooms" message
+        if (y == listStartY + 1 && totalRooms == 0) {
+            renderCenteredText(output, "No rooms available", screenW, DETAIL_FG, BG);
+            rendered = true;
+        }
+
+        // Action buttons
+        if (y == buttonY) {
+            std::string buttonLine;
+            for (int b = 0; b < buttonCount; b++) {
+                if (b > 0) buttonLine += "   ";
+                buttonLine += buttonLabels[b];
+            }
+
+            int padLeft = (screenW - (int)buttonLine.size()) / 2;
+            if (padLeft < 0) padLeft = 0;
+
+            output += BG;
+            for (int x = 0; x < padLeft && x < screenW; x++) output += ' ';
+
+            int col = padLeft;
+            for (int b = 0; b < buttonCount; b++) {
+                if (b > 0) { output += BG; output += NORMAL_FG; output += "   "; col += 3; }
+                bool btnSel = (m_focus == 1 && b == m_buttonIdx);
+                output += (btnSel ? SELECTED_FG : NORMAL_FG);
+                output += (btnSel ? SELECTED_BG : BG);
+                output += buttonLabels[b];
+                col += (int)strlen(buttonLabels[b]);
+            }
+
+            output += BG;
+            for (int x = col; x < screenW; x++) output += ' ';
+            rendered = true;
+        }
+
+        if (y == screenH - 2) {
+            renderCenteredText(output, "UP/DOWN: Navigate | LEFT/RIGHT: Buttons | ENTER: Select/Join | ESC: Back",
+                             screenW, HINT_FG, BG);
+            rendered = true;
+        }
+
+        if (!rendered) renderEmptyLine(output, screenW, BG);
+        endLine(output, y, screenH);
+    }
+
+    output += "\033[0m";
+    flushOutput(output);
+}
