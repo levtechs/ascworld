@@ -47,6 +47,56 @@ static void getTerminalSize(int& width, int& height) {
     }
 }
 
+static bool projectToScreen(const Camera& camera,
+                            const Vec3& worldPos,
+                            int screenW,
+                            int screenH,
+                            int& outX,
+                            int& outY) {
+    Mat4 view = camera.viewMatrix();
+    Mat4 proj = camera.projectionMatrix(screenW, screenH);
+    Vec4 clip = proj * (view * Vec4(worldPos, 1.0f));
+    if (clip.w <= 0.001f) return false;
+
+    Vec3 ndc = clip.perspectiveDivide();
+    if (ndc.z < -1.0f || ndc.z > 1.0f) return false;
+    if (ndc.x < -1.2f || ndc.x > 1.2f || ndc.y < -1.2f || ndc.y > 1.2f) return false;
+
+    outX = static_cast<int>((ndc.x * 0.5f + 0.5f) * (screenW - 1));
+    outY = static_cast<int>((1.0f - (ndc.y * 0.5f + 0.5f)) * (screenH - 1));
+    return outX >= 0 && outX < screenW && outY >= 0 && outY < screenH;
+}
+
+static void renderRemoteNameLabels(const Camera& camera,
+                                   const std::vector<RemotePlayer*>& remotePlayers,
+                                   int screenW,
+                                   int screenH) {
+    for (auto* rp : remotePlayers) {
+        if (!rp) continue;
+
+        Vec3 labelPos = rp->position() + Vec3(0.0f, 1.95f, 0.0f);
+        int sx = 0;
+        int sy = 0;
+        if (!projectToScreen(camera, labelPos, screenW, screenH, sx, sy)) continue;
+
+        const std::string& name = rp->name();
+        if (name.empty()) continue;
+
+        std::string shown = name;
+        if (shown.size() > 16) shown = shown.substr(0, 16);
+
+        int startX = sx - static_cast<int>(shown.size()) / 2;
+        if (startX < 0) startX = 0;
+        if (startX + static_cast<int>(shown.size()) > screenW) {
+            startX = screenW - static_cast<int>(shown.size());
+        }
+        if (startX < 0 || sy < 0 || sy >= screenH) continue;
+
+        printf("\033[%d;%dH\033[38;2;255;245;190m%s\033[0m",
+               sy + 1, startX + 1, shown.c_str());
+    }
+}
+
 enum class GameState {
     ModeSelect,
     MainMenu,
@@ -366,6 +416,9 @@ int main() {
                     hostSetupScreen.reset();
                     inputState.textInputMode.store(true, std::memory_order_relaxed);
                     switchState(GameState::HostSetup, &hostSetupScreen);
+                } else if (result == MenuResult::ChangeUsername) {
+                    inputState.textInputMode.store(true, std::memory_order_relaxed);
+                    switchState(GameState::UsernameEntry, &usernameScreen);
                 } else if (result == MenuResult::JoinGame) {
                     // User selected a room to join
                     if (lobbyScreen.joinRoomNeedsPassword()) {
@@ -643,10 +696,13 @@ int main() {
                     if (seed == 0) seed = worldSeed;
 
                     // Attempt host reassignment by promoting this client to host.
-                    std::string rehostName = "REHOST " + std::to_string(seed % 10000);
-                    std::string newRoomId = lobby.hostGame(rehostName, seed, true, "");
+                    // Keep the original room name.
+                    std::string rehostName = lobby.roomName();
+                    if (rehostName.empty()) {
+                        rehostName = "Online " + std::to_string(seed % 10000);
+                    }
+                    std::string newRoomId = lobby.hostGame(rehostName, seed, true, "");;
                     if (!newRoomId.empty()) {
-                        std::cerr << "[MAIN] Host disconnected; promoted local client to host in room " << newRoomId << std::endl;
                         worldSeed = seed;
                         currentWorldName = rehostName;
                         inputState.consumePresses();
@@ -699,6 +755,8 @@ int main() {
 
                 fb.clear();
                 renderer.render(allObjects, world.lights(), camera, fb);
+                fb.render();
+                renderRemoteNameLabels(camera, remotePlayers, screenW, screenH);
 
                 // HUD line
                 int playerCount = static_cast<int>(remotePlayers.size()) + 1;
@@ -709,8 +767,7 @@ int main() {
                          playerCount == 1 ? "" : "s",
                          lobby.isHosting() ? "Hosting" : "Connected");
                 printf("%s", hudBuf);
-
-                fb.render();
+                fflush(stdout);
                 break;
             }
 
@@ -752,10 +809,13 @@ int main() {
                     uint32_t seed = lobby.worldSeed();
                     if (seed == 0) seed = worldSeed;
 
-                    std::string rehostName = "REHOST " + std::to_string(seed % 10000);
+                    // Keep the original room name.
+                    std::string rehostName = lobby.roomName();
+                    if (rehostName.empty()) {
+                        rehostName = "Online " + std::to_string(seed % 10000);
+                    }
                     std::string newRoomId = lobby.hostGame(rehostName, seed, true, "");
                     if (!newRoomId.empty()) {
-                        std::cerr << "[MAIN] Host disconnected during pause; promoted local client to host in room " << newRoomId << std::endl;
                         worldSeed = seed;
                         currentWorldName = rehostName;
                         inputState.consumePresses();
@@ -808,6 +868,8 @@ int main() {
                     camera.setFromPlayer(player.eyePosition(), player.yaw(), player.pitch());
                     fb.clear();
                     renderer.render(allObjects, world.lights(), camera, fb);
+                    fb.render();
+                    renderRemoteNameLabels(camera, remotePlayers, screenW, screenH);
 
                     // HUD line
                     int playerCount = static_cast<int>(remotePlayers.size()) + 1;
@@ -818,10 +880,9 @@ int main() {
                              playerCount == 1 ? "" : "s",
                              lobby.isHosting() ? "Hosting" : "Connected");
                     printf("%s", hudBuf);
-
-                    fb.render();
                     // Draw pause overlay on top
                     pauseOverlay.render(screenW, screenH);
+                    fflush(stdout);
                 }
                 break;
             }

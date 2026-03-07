@@ -37,6 +37,7 @@ public:
 
     // Room metadata
     const std::string& roomId() const { return m_roomId; }
+    const std::string& roomName() const { return m_roomName; }
     const std::string& playerName() const { return m_playerName; }
 
     // Get the world seed (received from host)
@@ -61,6 +62,7 @@ private:
     Signaling m_signaling;
 
     std::string m_roomId;
+    std::string m_roomName;
     std::string m_playerName;
     PeerId m_localPeerId = PEER_ID_INVALID;
     uint32_t m_worldSeed = 0;

@@ -15,6 +15,7 @@ enum class MenuResult {
     OfflinePlay,    // User chose offline play
     HostGame,       // User wants to host
     JoinGame,       // User wants to join a room
+    ChangeUsername, // User wants to edit username
     Back,           // Navigate back one screen
     Disconnect,     // Cancel connection / disconnect
 };
@@ -40,8 +41,8 @@ public:
     static constexpr const char* INPUT_BG   = "\033[48;2;25;28;40m";
 
     // ---- ASCII art title (shared across several screens) ----
-    static constexpr int TITLE_LINES = 4;
-    static constexpr int TITLE_WIDTH = 41;
+    static constexpr int TITLE_LINES = 5;
+    static constexpr int TITLE_WIDTH = 55;
     static void renderTitle(std::string& output, int screenW, int startY, int y);
 
     // ---- Common render helpers ----

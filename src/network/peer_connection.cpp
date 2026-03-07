@@ -1,6 +1,5 @@
 #include "network/peer_connection.h"
 #include <stdexcept>
-#include <iostream>
 
 PeerChannel::PeerChannel() = default;
 
@@ -19,23 +18,19 @@ void PeerChannel::create(bool isOfferer) {
     // --- Signaling callbacks ---
 
     m_pc->onLocalDescription([this](rtc::Description description) {
-        std::cerr << "[PEER] onLocalDescription type=" << (description.type() == rtc::Description::Type::Offer ? "offer" : "answer") << std::endl;
         std::lock_guard<std::mutex> lock(m_mutex);
         if (m_sdpCallback) {
             m_sdpCallback(std::string(description));
         } else {
-            std::cerr << "[PEER] Buffering SDP (callback not set yet)" << std::endl;
             m_pendingSdp = std::string(description);
         }
     });
 
     m_pc->onLocalCandidate([this](rtc::Candidate candidate) {
-        std::cerr << "[PEER] onLocalCandidate mid=" << candidate.mid() << std::endl;
         std::lock_guard<std::mutex> lock(m_mutex);
         if (m_candidateCallback) {
             m_candidateCallback(std::string(candidate), candidate.mid());
         } else {
-            std::cerr << "[PEER] Buffering candidate (callback not set yet)" << std::endl;
             m_pendingCandidates.emplace_back(std::string(candidate), candidate.mid());
         }
     });
@@ -43,9 +38,6 @@ void PeerChannel::create(bool isOfferer) {
     // --- Connection state ---
 
     m_pc->onStateChange([this](rtc::PeerConnection::State state) {
-        const char* stateNames[] = {"New", "Connecting", "Connected", "Disconnected", "Failed", "Closed"};
-        std::cerr << "[PEER] PeerConnection state: " << stateNames[static_cast<int>(state)] << std::endl;
-
         if (state == rtc::PeerConnection::State::Connected) {
             // Don't fire connected callback here — wait for DataChannels to open
             m_connected = true;
@@ -55,7 +47,6 @@ void PeerChannel::create(bool isOfferer) {
             bool wasConnected = m_connected.exchange(false);
             std::lock_guard<std::mutex> lock(m_mutex);
             if (m_connectedCb && wasConnected) {
-                std::cerr << "[PEER] Firing disconnected callback" << std::endl;
                 m_connectedCb(false);
             }
         }
@@ -96,10 +87,8 @@ void PeerChannel::setupDataChannel(std::shared_ptr<rtc::DataChannel> dc, bool re
     dc->onOpen([this, reliable]() {
         if (reliable) {
             m_reliableOpen = true;
-            std::cerr << "[PEER] Reliable DataChannel opened" << std::endl;
         } else {
             m_unreliableOpen = true;
-            std::cerr << "[PEER] Unreliable DataChannel opened" << std::endl;
         }
 
         // Fire connected callback only when BOTH channels are open
@@ -107,14 +96,12 @@ void PeerChannel::setupDataChannel(std::shared_ptr<rtc::DataChannel> dc, bool re
             std::lock_guard<std::mutex> lock(m_mutex);
             if (m_connectedCb && !m_connectedFired) {
                 m_connectedFired = true;
-                std::cerr << "[PEER] Both DataChannels open — firing connected callback" << std::endl;
                 m_connectedCb(true);
             }
         }
     });
 
     dc->onClosed([this, reliable]() {
-        std::cerr << "[PEER] DataChannel closed: " << (reliable ? "reliable" : "unreliable") << std::endl;
         if (reliable) m_reliableOpen = false;
         else m_unreliableOpen = false;
     });
@@ -186,7 +173,6 @@ void PeerChannel::onLocalDescription(SDPCallback callback) {
     }
     // Replay buffered SDP outside lock
     if (!buffered.empty() && callback) {
-        std::cerr << "[PEER] Replaying buffered SDP (length=" << buffered.size() << ")" << std::endl;
         callback(buffered);
     }
 }
@@ -201,7 +187,6 @@ void PeerChannel::onLocalCandidate(CandidateCallback callback) {
     }
     // Replay buffered candidates outside lock
     if (!buffered.empty() && callback) {
-        std::cerr << "[PEER] Replaying " << buffered.size() << " buffered candidates" << std::endl;
         for (auto& [cand, mid] : buffered) {
             callback(cand, mid);
         }
@@ -228,18 +213,14 @@ void PeerChannel::onConnected(StateCallback callback) {
     }
     // If both DataChannels already open when callback is set, fire immediately
     if (bothOpen && callback) {
-        std::cerr << "[PEER] Replaying connected state (both DataChannels already open)" << std::endl;
         callback(true);
     }
 }
 
 void PeerChannel::setRemoteDescription(const std::string& sdp, const std::string& type) {
     if (!m_pc) {
-        std::cerr << "[PEER] setRemoteDescription called but m_pc is null!" << std::endl;
         return;
     }
-
-    std::cerr << "[PEER] setRemoteDescription type=" << type << " sdp_length=" << sdp.size() << std::endl;
 
     rtc::Description::Type descType;
     if (type == "offer") {
@@ -250,9 +231,7 @@ void PeerChannel::setRemoteDescription(const std::string& sdp, const std::string
 
     try {
         m_pc->setRemoteDescription(rtc::Description(sdp, descType));
-        std::cerr << "[PEER] setRemoteDescription succeeded" << std::endl;
-    } catch (const std::exception& e) {
-        std::cerr << "[PEER] setRemoteDescription FAILED: " << e.what() << std::endl;
+    } catch (...) {
         return;
     }
 
@@ -265,12 +244,10 @@ void PeerChannel::setRemoteDescription(const std::string& sdp, const std::string
         m_pendingRemoteCandidates.clear();
     }
     if (!buffered.empty()) {
-        std::cerr << "[PEER] Flushing " << buffered.size() << " buffered remote candidates" << std::endl;
         for (auto& [cand, mid2] : buffered) {
             try {
                 m_pc->addRemoteCandidate(rtc::Candidate(cand, mid2));
-            } catch (const std::exception& e) {
-                std::cerr << "[PEER] addRemoteCandidate (buffered) FAILED: " << e.what() << std::endl;
+            } catch (...) {
             }
         }
     }
@@ -282,7 +259,6 @@ void PeerChannel::addRemoteCandidate(const std::string& candidate, const std::st
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (!m_hasRemoteDescription) {
-            std::cerr << "[PEER] Buffering remote candidate (no remote description yet) mid=" << mid << std::endl;
             m_pendingRemoteCandidates.emplace_back(candidate, mid);
             return;
         }
@@ -290,8 +266,7 @@ void PeerChannel::addRemoteCandidate(const std::string& candidate, const std::st
 
     try {
         m_pc->addRemoteCandidate(rtc::Candidate(candidate, mid));
-    } catch (const std::exception& e) {
-        std::cerr << "[PEER] addRemoteCandidate FAILED: " << e.what() << std::endl;
+    } catch (...) {
     }
 }
 

@@ -48,6 +48,9 @@ public:
     bool hasWorldSeed() const;
     PeerId localPeerId() const;
 
+    // Room name (for rehosting)
+    std::string roomName() const;
+
     // Get connection state (for UI)
     ClientSession::State clientState() const;
 

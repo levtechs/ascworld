@@ -1,18 +1,16 @@
 #include "ui/menu/lobby.h"
-#include <iostream>
+#include <cstring>
 
 void LobbyScreen::setRooms(const std::vector<RoomInfo>& rooms) {
-    std::cerr << "[UI] LobbyScreen::setRooms input=" << rooms.size() << std::endl;
     m_rooms = rooms;
     if (m_roomSelected >= (int)m_rooms.size())
         m_roomSelected = m_rooms.empty() ? 0 : (int)m_rooms.size() - 1;
 }
 
 void LobbyScreen::clearRooms() {
-    std::cerr << "[UI] LobbyScreen::clearRooms" << std::endl;
     m_rooms.clear();
     m_roomSelected = 0;
-    m_focus = 0;
+    m_focus = 1;        // default to room list
     m_buttonIdx = 0;
     m_joinRoomId.clear();
     m_joinNeedsPassword = false;
@@ -25,18 +23,30 @@ MenuResult LobbyScreen::update(InputState& input, int /*screenW*/, int /*screenH
     if (p.back) return MenuResult::Back;
 
     if (m_focus == 0) {
+        // Username line selected
+        if (p.down) {
+            m_focus = 1;  // move to room list
+        }
+        if (p.confirm) {
+            return MenuResult::ChangeUsername;
+        }
+    } else if (m_focus == 1) {
         // Room list
         int count = (int)m_rooms.size();
-        if (p.up && count > 0) {
-            m_roomSelected--;
-            if (m_roomSelected < 0) m_roomSelected = count - 1;
+        if (p.up) {
+            if (count > 0 && m_roomSelected > 0) {
+                m_roomSelected--;
+            } else {
+                // At top of list (or empty) — move to username
+                m_focus = 0;
+            }
         }
         if (p.down) {
             if (count > 0 && m_roomSelected < count - 1) {
                 m_roomSelected++;
             } else {
-                // At bottom of list (or empty list) — move to button bar
-                m_focus = 1;
+                // At bottom of list (or empty) — move to button bar
+                m_focus = 2;
                 m_buttonIdx = 0;
             }
         }
@@ -44,18 +54,13 @@ MenuResult LobbyScreen::update(InputState& input, int /*screenW*/, int /*screenH
         if (p.confirm && count > 0 && m_roomSelected < count) {
             const RoomInfo& room = m_rooms[m_roomSelected];
             m_joinRoomId = room.roomId;
-            if (room.hasPassword) {
-                m_joinNeedsPassword = true;
-                return MenuResult::JoinGame; // main.cpp will show password screen
-            } else {
-                m_joinNeedsPassword = false;
-                return MenuResult::JoinGame;
-            }
+            m_joinNeedsPassword = room.hasPassword;
+            return MenuResult::JoinGame;
         }
     } else {
-        // Button bar — left/right to navigate, up to return to room list
+        // Button bar (focus == 2)
         if (p.up) {
-            m_focus = 0;
+            m_focus = 1;  // back to room list
         }
         if (p.left) { m_buttonIdx--; if (m_buttonIdx < 0) m_buttonIdx = 2; }
         if (p.right) { m_buttonIdx++; if (m_buttonIdx > 2) m_buttonIdx = 0; }
@@ -105,8 +110,12 @@ void LobbyScreen::render(int screenW, int screenH) const {
         }
 
         if (y == usernameY) {
+            bool userSel = (m_focus == 0);
             std::string userLine = "Player: " + m_playerName;
-            renderCenteredText(output, userLine.c_str(), screenW, ACCENT_FG, BG);
+            if (userSel) userLine += "  [Change]";
+            renderCenteredText(output, userLine.c_str(), screenW,
+                               userSel ? SELECTED_FG : ACCENT_FG,
+                               userSel ? SELECTED_BG : BG);
             rendered = true;
         }
 
@@ -128,7 +137,7 @@ void LobbyScreen::render(int screenW, int screenH) const {
         if (y >= listStartY && listIdx < maxVisible && (listIdx + scrollOffset) < totalRooms) {
             int roomIdx = listIdx + scrollOffset;
             const RoomInfo& room = m_rooms[roomIdx];
-            bool sel = (m_focus == 0 && roomIdx == m_roomSelected);
+            bool sel = (m_focus == 1 && roomIdx == m_roomSelected);
 
             std::string nameStr = room.name;
             if ((int)nameStr.size() > 20) nameStr = nameStr.substr(0, 17) + "...";
@@ -185,7 +194,7 @@ void LobbyScreen::render(int screenW, int screenH) const {
             int col = padLeft;
             for (int b = 0; b < buttonCount; b++) {
                 if (b > 0) { output += BG; output += NORMAL_FG; output += "   "; col += 3; }
-                bool btnSel = (m_focus == 1 && b == m_buttonIdx);
+                bool btnSel = (m_focus == 2 && b == m_buttonIdx);
                 output += (btnSel ? SELECTED_FG : NORMAL_FG);
                 output += (btnSel ? SELECTED_BG : BG);
                 output += buttonLabels[b];
@@ -198,7 +207,7 @@ void LobbyScreen::render(int screenW, int screenH) const {
         }
 
         if (y == screenH - 2) {
-            renderCenteredText(output, "UP/DOWN: Navigate | LEFT/RIGHT: Buttons | ENTER: Select/Join | ESC: Back",
+            renderCenteredText(output, "UP/DOWN: Navigate | LEFT/RIGHT: Buttons | ENTER: Select | ESC: Back",
                              screenW, HINT_FG, BG);
             rendered = true;
         }

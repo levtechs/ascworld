@@ -2,7 +2,6 @@
 #include <nlohmann/json.hpp>
 #include <thread>
 #include <chrono>
-#include <iostream>
 
 using json = nlohmann::json;
 
@@ -22,13 +21,11 @@ std::string Signaling::sigPath(const std::string& peerId) const {
 
 void Signaling::listenForOffers(OfferCallback callback) {
     std::string basePath = "signaling/" + m_roomId;
-    std::cerr << "[SIG] Listening for offers on path: " << basePath << std::endl;
 
     m_firebase.startListening(basePath, [this, callback](const std::string& event,
                                                           const std::string& path,
                                                           const json& data) {
         if (!m_running) return;
-        std::cerr << "[SIG] SSE event: " << event << " path=" << path << " data_type=" << (data.is_null() ? "null" : data.type_name()) << std::endl;
 
         // SSE events come with paths relative to the listened path.
         // We expect paths like "/{peerId}/offer" for individual updates
@@ -89,9 +86,7 @@ void Signaling::listenForOffers(OfferCallback callback) {
 
 void Signaling::sendAnswer(const std::string& remotePeerId, const std::string& sdpAnswer) {
     std::string path = sigPath(remotePeerId) + "/answer";
-    std::cerr << "[SIG] Sending answer to path: " << path << " (length=" << sdpAnswer.size() << ")" << std::endl;
-    bool ok = m_firebase.put(path, json(sdpAnswer));
-    std::cerr << "[SIG] sendAnswer result: " << (ok ? "success" : "FAILED") << std::endl;
+    m_firebase.put(path, json(sdpAnswer));
 }
 
 // --- Client side ---
@@ -99,37 +94,26 @@ void Signaling::sendAnswer(const std::string& remotePeerId, const std::string& s
 void Signaling::sendOffer(const std::string& hostPeerId, const std::string& sdpOffer) {
     (void)hostPeerId; // Offer is stored under our own peer ID
     std::string path = sigPath(m_localPeerId) + "/offer";
-    std::cerr << "[SIG] Sending offer to path: " << path << " (length=" << sdpOffer.size() << ")" << std::endl;
-    bool ok = m_firebase.put(path, json(sdpOffer));
-    std::cerr << "[SIG] sendOffer result: " << (ok ? "success" : "FAILED") << std::endl;
+    m_firebase.put(path, json(sdpOffer));
 }
 
 void Signaling::listenForAnswer(const std::string& hostPeerId, AnswerCallback callback) {
     (void)hostPeerId;
     std::string answerPath = sigPath(m_localPeerId) + "/answer";
-    std::cerr << "[SIG] Polling for answer at: " << answerPath << std::endl;
 
     // Poll in a detached thread every 200ms until answer appears
     std::thread([this, answerPath, callback]() {
-        int pollCount = 0;
         while (m_running) {
             json data = m_firebase.get(answerPath);
-            pollCount++;
-            if (pollCount % 10 == 1) {
-                std::cerr << "[SIG] listenForAnswer poll #" << pollCount
-                          << " data_type=" << (data.is_null() ? "null" : data.type_name()) << std::endl;
-            }
             if (!data.is_null() && data.is_string()) {
                 std::string answer = data.get<std::string>();
                 if (!answer.empty()) {
-                    std::cerr << "[SIG] Got answer! length=" << answer.size() << std::endl;
                     callback(answer);
                     return;
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
-        std::cerr << "[SIG] listenForAnswer stopped (m_running=false)" << std::endl;
     }).detach();
 }
 
@@ -150,13 +134,11 @@ void Signaling::sendCandidate(const std::string& remotePeerId, const std::string
     };
 
     std::string path = sigPath(m_localPeerId) + "/candidates/" + std::to_string(index);
-    std::cerr << "[SIG] sendCandidate #" << index << " to path: " << path << " mid=" << mid << std::endl;
     m_firebase.put(path, candidateJson);
 }
 
 void Signaling::listenForCandidates(const std::string& remotePeerId, CandidateCallback callback) {
     std::string candidatesPath = sigPath(remotePeerId) + "/candidates";
-    std::cerr << "[SIG] Polling for candidates at: " << candidatesPath << std::endl;
 
     // Poll in a detached thread every 200ms for new candidates
     std::thread([this, candidatesPath, callback]() {
@@ -180,7 +162,6 @@ void Signaling::listenForCandidates(const std::string& remotePeerId, CandidateCa
                             std::string mid = val.value("mid", "");
                             int sdpMLineIndex = val.value("sdpMLineIndex", 0);
                             if (!candidate.empty()) {
-                                std::cerr << "[SIG] Got remote candidate #" << idx << " mid=" << mid << std::endl;
                                 callback(candidate, mid, sdpMLineIndex);
                             }
                         }

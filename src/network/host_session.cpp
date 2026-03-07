@@ -2,7 +2,6 @@
 #include <random>
 #include <chrono>
 #include <ctime>
-#include <iostream>
 
 HostSession::HostSession(FirebaseClient& firebase)
     : m_firebase(firebase)
@@ -46,19 +45,15 @@ std::string HostSession::createRoom(const std::string& roomName, const std::stri
     roomData["hasPassword"] = !password.empty();
     roomData["createdAt"] = static_cast<int64_t>(std::time(nullptr));
 
-    std::cerr << "[HOST] Creating room " << m_roomId << " name='" << roomName << "' seed=" << seed << std::endl;
     m_firebase.put("rooms/" + m_roomId, roomData);
 
     m_signaling.setRoom(m_roomId, "host");
     m_active = true;
-    std::cerr << "[HOST] Room created, signaling set up" << std::endl;
     return m_roomId;
 }
 
 void HostSession::startAccepting() {
-    std::cerr << "[HOST] Starting to accept peers (listening for offers)" << std::endl;
     m_signaling.listenForOffers([this](const std::string& remotePeerId, const std::string& sdpOffer) {
-        std::cerr << "[HOST] Received offer from peer: " << remotePeerId << " (sdp length=" << sdpOffer.size() << ")" << std::endl;
         onNewPeer(remotePeerId, sdpOffer);
     });
 }
@@ -71,22 +66,18 @@ void HostSession::onNewPeer(const std::string& remotePeerId, const std::string& 
         assignedId = m_nextPeerId++;
     }
 
-    std::cerr << "[HOST] Creating answerer PeerChannel for " << remotePeerId << " (assignedId=" << (int)assignedId << ")" << std::endl;
     auto channel = std::make_shared<PeerChannel>();
     channel->create(false);
 
     channel->onLocalDescription([this, remotePeerId](const std::string& sdp) {
-        std::cerr << "[HOST] Sending SDP answer to " << remotePeerId << " (length=" << sdp.size() << ")" << std::endl;
         m_signaling.sendAnswer(remotePeerId, sdp);
     });
 
     channel->onLocalCandidate([this, remotePeerId](const std::string& candidate, const std::string& mid) {
-        std::cerr << "[HOST] Sending ICE candidate to " << remotePeerId << " mid=" << mid << std::endl;
         m_signaling.sendCandidate(remotePeerId, candidate, mid, 0);
     });
 
     channel->onConnected([this, remotePeerId, assignedId](bool connected) {
-        std::cerr << "[HOST] onConnected for " << remotePeerId << " connected=" << connected << std::endl;
         if (!connected) {
             removePeer(remotePeerId);
             return;
@@ -149,8 +140,6 @@ void HostSession::onNewPeer(const std::string& remotePeerId, const std::string& 
             count = static_cast<int>(m_peers.size()) + 1;
         }
 
-        std::cerr << "[HOST] Sending AssignId(" << (int)assignedId << ") to " << remotePeerId << std::endl;
-        std::cerr << "[HOST] Sending WorldSeed(" << m_seed << ") to " << remotePeerId << std::endl;
         if (newPeerChannel && newPeerChannel->isConnected()) {
             for (const auto& msg : bootstrapMsgs) {
                 newPeerChannel->sendReliable(msg);
@@ -181,9 +170,7 @@ void HostSession::onNewPeer(const std::string& remotePeerId, const std::string& 
         peer.channel = channel;
     }
 
-    std::cerr << "[HOST] Calling setRemoteDescription(offer) for " << remotePeerId << " (outside lock)" << std::endl;
     channel->setRemoteDescription(sdpOffer, "offer");
-    std::cerr << "[HOST] setRemoteDescription(offer) returned for " << remotePeerId << std::endl;
 
     m_signaling.listenForCandidates(remotePeerId,
         [this, remotePeerId](const std::string& candidate, const std::string& mid, int /*sdpMLineIndex*/) {
@@ -345,13 +332,25 @@ void HostSession::update(float dt, const PlayerNetState& localState) {
     }
 
     std::vector<std::string> staleIds;
+    std::vector<std::string> disconnectedIds;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         for (auto& [peerId, peer] : m_peers) {
+            // Do NOT remove peers that are still handshaking.
+            // A peer gets a RemotePlayer only after onConnected(true).
+            // Before that, isConnected() can be false for a short period.
+            if (peer.player && (!peer.channel || !peer.channel->isConnected())) {
+                disconnectedIds.push_back(peerId);
+                continue;
+            }
             if (peer.player && peer.player->isStale()) {
                 staleIds.push_back(peerId);
             }
         }
+    }
+
+    for (const auto& id : disconnectedIds) {
+        removePeer(id);
     }
 
     for (const auto& id : staleIds) {
@@ -415,7 +414,6 @@ bool HostSession::collectPeerForRemoval(const std::string& remotePeerId, Disconn
 }
 
 void HostSession::finalizePeerRemoval(DisconnectInfo info) {
-    std::cerr << "[HOST] Removing peer " << info.peerId << " (id=" << (int)info.id << ")" << std::endl;
     if (info.channel) {
         info.channel->onConnected(nullptr);
         info.channel->onReliableMessage(nullptr);
@@ -472,5 +470,4 @@ void HostSession::close() {
 
     m_firebase.del("rooms/" + m_roomId);
     m_firebase.del("signaling/" + m_roomId);
-    std::cerr << "[HOST] Session closed, room " << m_roomId << " deleted" << std::endl;
 }

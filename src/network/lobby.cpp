@@ -1,5 +1,4 @@
 #include "network/lobby.h"
-#include <iostream>
 
 Lobby::Lobby() = default;
 
@@ -20,9 +19,7 @@ std::vector<RoomInfo> Lobby::refreshRooms() {
     // Always use a fresh lightweight client session for listing so we never keep
     // stale in-memory room vectors from an active joined client instance.
     ClientSession tempClient(m_firebase);
-    auto rooms = tempClient.listRooms();
-    std::cerr << "[LOBBY] refreshRooms returned " << rooms.size() << " room(s)" << std::endl;
-    return rooms;
+    return tempClient.listRooms();
 }
 
 std::string Lobby::hostGame(const std::string& roomName, uint32_t seed,
@@ -118,4 +115,11 @@ ClientSession::State Lobby::clientState() const {
         return ClientSession::State::Connected; // host is always "connected"
     }
     return ClientSession::State::Disconnected;
+}
+
+std::string Lobby::roomName() const {
+    if (m_clientSession) {
+        return m_clientSession->roomName();
+    }
+    return ""; // host knows its own name
 }

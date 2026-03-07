@@ -55,7 +55,7 @@ void MainMenuScreen::render(int screenW, int screenH) const {
 
         // Subtitle
         if (y == startY + TITLE_LINES + 1) {
-            renderCenteredText(output, "~ A Terminal 3D Explorer ~", screenW, SUBTITLE_FG, BG);
+            renderCenteredText(output, "~ A Terminal 3D World ~", screenW, SUBTITLE_FG, BG);
             rendered = true;
         }
 

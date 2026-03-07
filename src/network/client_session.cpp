@@ -1,7 +1,6 @@
 #include "network/client_session.h"
 #include <algorithm>
 #include <random>
-#include <iostream>
 #include <ctime>
 
 ClientSession::ClientSession(FirebaseClient& firebase)
@@ -76,7 +75,6 @@ std::vector<RoomInfo> ClientSession::listRooms() {
 
     // Clean up stale rooms from Firebase (best-effort)
     for (const auto& staleId : staleRoomIds) {
-        std::cerr << "[CLIENT] Cleaning up stale room: " << staleId << std::endl;
         m_firebase.del("rooms/" + staleId);
         m_firebase.del("signaling/" + staleId);
     }
@@ -85,9 +83,6 @@ std::vector<RoomInfo> ClientSession::listRooms() {
         if (a.name == b.name) return a.roomId < b.roomId;
         return a.name < b.name;
     });
-
-    std::cerr << "[CLIENT] listRooms fetched visible=" << rooms.size()
-              << " cleaned=" << staleRoomIds.size() << std::endl;
 
     return rooms;
 }
@@ -99,46 +94,37 @@ bool ClientSession::joinRoom(const std::string& roomId, const std::string& playe
     if (roomData.is_null()) return false;
 
     m_roomId = roomId;
+    m_roomName = roomData.value("name", "Unnamed Room");
     m_playerName = playerName;
 
     // Generate a local peer ID string for signaling
     std::string localPeerIdStr = generateLocalPeerId();
-    std::cerr << "[CLIENT] Joining room " << roomId << " as '" << playerName << "' (peerId=" << localPeerIdStr << ")" << std::endl;
-
     // Set up signaling
     m_signaling.setRoom(roomId, localPeerIdStr);
 
     // Create PeerChannel as offerer
     m_hostChannel = std::make_unique<PeerChannel>();
     m_hostChannel->create(true); // offerer
-    std::cerr << "[CLIENT] PeerChannel created as offerer" << std::endl;
 
     // Set up signaling callbacks
     m_hostChannel->onLocalDescription([this](const std::string& sdp) {
-        std::cerr << "[CLIENT] Sending SDP offer (length=" << sdp.size() << ")" << std::endl;
         m_signaling.sendOffer("host", sdp);
     });
 
     m_hostChannel->onLocalCandidate([this](const std::string& candidate, const std::string& mid) {
-        std::cerr << "[CLIENT] Sending ICE candidate mid=" << mid << std::endl;
         m_signaling.sendCandidate("host", candidate, mid, 0);
     });
 
     // Listen for answer from host
-    std::cerr << "[CLIENT] Starting to listen for SDP answer from host" << std::endl;
     m_signaling.listenForAnswer("host", [this](const std::string& sdpAnswer) {
-        std::cerr << "[CLIENT] Received SDP answer from host (length=" << sdpAnswer.size() << ")" << std::endl;
         if (m_hostChannel) {
             m_hostChannel->setRemoteDescription(sdpAnswer, "answer");
-            std::cerr << "[CLIENT] Applied remote description (answer)" << std::endl;
         }
     });
 
     // Listen for remote ICE candidates from host
-    std::cerr << "[CLIENT] Starting to listen for ICE candidates from host" << std::endl;
     m_signaling.listenForCandidates("host",
         [this](const std::string& candidate, const std::string& mid, int /*sdpMLineIndex*/) {
-            std::cerr << "[CLIENT] Received ICE candidate from host mid=" << mid << std::endl;
             if (m_hostChannel) {
                 m_hostChannel->addRemoteCandidate(candidate, mid);
             }
@@ -146,7 +132,6 @@ bool ClientSession::joinRoom(const std::string& roomId, const std::string& playe
 
     // Connection state handler
     m_hostChannel->onConnected([this](bool connected) {
-        std::cerr << "[CLIENT] onConnected: " << connected << std::endl;
         if (connected) {
             setState(State::Connected);
 
@@ -156,10 +141,8 @@ bool ClientSession::joinRoom(const std::string& roomId, const std::string& playe
             joinMsg.name = m_playerName;
             if (m_hostChannel) {
                 m_hostChannel->sendReliable(joinMsg.serialize());
-                std::cerr << "[CLIENT] Sent PlayerJoinMsg to host" << std::endl;
             }
         } else {
-            std::cerr << "[CLIENT] Connection failed/disconnected" << std::endl;
             setState(State::Failed);
         }
     });
@@ -174,7 +157,6 @@ bool ClientSession::joinRoom(const std::string& roomId, const std::string& playe
     });
 
     setState(State::Connecting);
-    std::cerr << "[CLIENT] Join initiated, state=Connecting" << std::endl;
     return true;
 }
 
@@ -208,7 +190,6 @@ void ClientSession::onHostMessage(const uint8_t* data, size_t len, bool /*reliab
             AssignIdMsg msg;
             if (AssignIdMsg::deserialize(data, len, msg)) {
                 m_localPeerId = msg.id;
-                std::cerr << "[CLIENT] Received AssignId: " << (int)msg.id << std::endl;
             }
             break;
         }
@@ -217,7 +198,6 @@ void ClientSession::onHostMessage(const uint8_t* data, size_t len, bool /*reliab
             if (WorldSeedMsg::deserialize(data, len, msg)) {
                 m_worldSeed = msg.seed;
                 m_hasWorldSeed = true;
-                std::cerr << "[CLIENT] Received WorldSeed: " << msg.seed << std::endl;
             }
             break;
         }
@@ -287,9 +267,7 @@ void ClientSession::leave() {
             PlayerLeaveMsg leaveMsg;
             leaveMsg.id = m_localPeerId;
             m_hostChannel->sendReliable(leaveMsg.serialize());
-            std::cerr << "[CLIENT] Sent PlayerLeave before disconnect" << std::endl;
         } catch (...) {
-            std::cerr << "[CLIENT] Failed to send PlayerLeave" << std::endl;
         }
     }
 
@@ -312,8 +290,6 @@ void ClientSession::leave() {
 }
 
 void ClientSession::setState(State s) {
-    const char* names[] = {"Disconnected", "Connecting", "Connected", "Failed"};
-    std::cerr << "[CLIENT] State: " << names[static_cast<int>(s)] << std::endl;
     m_state = s;
     if (m_stateCallback) {
         m_stateCallback(s);
