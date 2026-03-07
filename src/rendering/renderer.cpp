@@ -3,20 +3,87 @@
 #include <cmath>
 
 Renderer::Renderer()
-    : sunDir(Vec3(0.4f, 0.75f, 0.3f).normalized()),
-      sunColor(1.0f, 0.95f, 0.85f),
-      sunIntensity(0.85f),
-      ambientColor(0.08f, 0.09f, 0.12f),
-      fogColor(0.55f, 0.6f, 0.7f),   // match horizon haze
-      fogStart(20.0f),
-      fogEnd(55.0f),
-      skyZenith(0.15f, 0.25f, 0.55f),
-      skyHorizon(0.55f, 0.6f, 0.7f),
-      groundFar(0.25f, 0.35f, 0.2f),
-      sunAngularRadius(0.08f) {}
+    : sunDir(Vec3(0.3f, 0.35f, 0.5f).normalized()),
+      sunColor(0.8f, 0.5f, 0.3f),
+      sunIntensity(0.5f),
+      ambientColor(0.12f, 0.10f, 0.08f),
+      fogColor(0.08f, 0.06f, 0.05f),   // dark smog
+      fogStart(30.0f),
+      fogEnd(80.0f),
+      skyZenith(0.05f, 0.03f, 0.08f),  // dark purple-gray
+      skyHorizon(0.15f, 0.08f, 0.04f), // polluted orange-brown haze
+      groundFar(0.06f, 0.05f, 0.04f),  // dark concrete
+      sunAngularRadius(0.12f) {}
+
+void Renderer::setCityAtmosphere(const Color3& fogCol, const Color3& ambientCol,
+                                  float fStart, float fEnd) {
+    fogColor = fogCol;
+    ambientColor = ambientCol;
+    fogStart = fStart;
+    fogEnd = fEnd;
+}
+
+// --- Frustum plane extraction from VP matrix (Griess-Hartmann method) ---
+void Renderer::extractFrustumPlanes(const Mat4& vp, FrustumPlane planes[6]) {
+    // Left:   row3 + row0
+    planes[0] = { vp.m[3][0]+vp.m[0][0], vp.m[3][1]+vp.m[0][1], vp.m[3][2]+vp.m[0][2], vp.m[3][3]+vp.m[0][3] };
+    // Right:  row3 - row0
+    planes[1] = { vp.m[3][0]-vp.m[0][0], vp.m[3][1]-vp.m[0][1], vp.m[3][2]-vp.m[0][2], vp.m[3][3]-vp.m[0][3] };
+    // Bottom: row3 + row1
+    planes[2] = { vp.m[3][0]+vp.m[1][0], vp.m[3][1]+vp.m[1][1], vp.m[3][2]+vp.m[1][2], vp.m[3][3]+vp.m[1][3] };
+    // Top:    row3 - row1
+    planes[3] = { vp.m[3][0]-vp.m[1][0], vp.m[3][1]-vp.m[1][1], vp.m[3][2]-vp.m[1][2], vp.m[3][3]-vp.m[1][3] };
+    // Near:   row3 + row2
+    planes[4] = { vp.m[3][0]+vp.m[2][0], vp.m[3][1]+vp.m[2][1], vp.m[3][2]+vp.m[2][2], vp.m[3][3]+vp.m[2][3] };
+    // Far:    row3 - row2
+    planes[5] = { vp.m[3][0]-vp.m[2][0], vp.m[3][1]-vp.m[2][1], vp.m[3][2]-vp.m[2][2], vp.m[3][3]-vp.m[2][3] };
+    for (int i = 0; i < 6; i++) planes[i].normalize();
+}
+
+float Renderer::meshBoundingRadius(const Mesh& mesh) {
+    // Use cached value if available (computed once by MeshCache or on first access)
+    if (mesh.boundingRadius >= 0.0f) return mesh.boundingRadius;
+    // Fallback: compute from vertices (should not happen with MeshCache)
+    float maxDistSq = 0.0f;
+    for (const auto& v : mesh.vertices) {
+        float dsq = v.x * v.x + v.y * v.y + v.z * v.z;
+        if (dsq > maxDistSq) maxDistSq = dsq;
+    }
+    return std::sqrt(maxDistSq);
+}
+
+float Renderer::maxScaleFactor(const Mat4& m) {
+    // Compute the length of each column vector (the 3 scale axes)
+    float sx = std::sqrt(m.m[0][0]*m.m[0][0] + m.m[1][0]*m.m[1][0] + m.m[2][0]*m.m[2][0]);
+    float sy = std::sqrt(m.m[0][1]*m.m[0][1] + m.m[1][1]*m.m[1][1] + m.m[2][1]*m.m[2][1]);
+    float sz = std::sqrt(m.m[0][2]*m.m[0][2] + m.m[1][2]*m.m[1][2] + m.m[2][2]*m.m[2][2]);
+    return std::max({sx, sy, sz});
+}
+
+// --- Spatial light grid ---
+void Renderer::buildLightGrid(const std::vector<PointLight>& lights, float cellSize,
+                               LightGrid& grid) {
+    grid.clear();
+    float invCell = 1.0f / cellSize;
+    for (const auto& light : lights) {
+        // Compute cells the light overlaps (its radius can span multiple cells)
+        int minCX = (int)std::floor((light.position.x - light.radius) * invCell);
+        int maxCX = (int)std::floor((light.position.x + light.radius) * invCell);
+        int minCZ = (int)std::floor((light.position.z - light.radius) * invCell);
+        int maxCZ = (int)std::floor((light.position.z + light.radius) * invCell);
+        for (int cx = minCX; cx <= maxCX; cx++) {
+            for (int cz = minCZ; cz <= maxCZ; cz++) {
+                grid[{cx, cz}].push_back(&light);
+            }
+        }
+    }
+}
 
 Color3 Renderer::shade(const Vec3& worldPos, const Vec3& normal, const Material& mat,
-                        const Vec3& camPos, const std::vector<PointLight>& lights) {
+                        const Vec3& camPos,
+                        const std::unordered_map<LightCellKey, std::vector<const PointLight*>, LightCellHash>& lightGrid,
+                        float lightCellSize,
+                        const PointLight* lightsBase) {
     Color3 result = ambientColor * mat.color;
 
     Vec3 viewDir = (camPos - worldPos).normalized();
@@ -24,40 +91,59 @@ Color3 Renderer::shade(const Vec3& worldPos, const Vec3& normal, const Material&
     // --- Directional light (sun) ---
     {
         float NdotL = std::max(0.0f, normal.dot(sunDir));
-        Color3 diffuse = mat.color * sunColor * (NdotL * sunIntensity);
-        result += diffuse;
+        if (NdotL > 0.0f) {
+            Color3 diffuse = mat.color * sunColor * (NdotL * sunIntensity);
+            result += diffuse;
 
-        // Blinn-Phong specular
-        if (mat.specular > 0.0f && NdotL > 0.0f) {
-            Vec3 halfVec = (sunDir + viewDir).normalized();
-            float NdotH = std::max(0.0f, normal.dot(halfVec));
-            float spec = std::pow(NdotH, mat.shininess);
-            result += sunColor * (spec * mat.specular * sunIntensity);
+            // Blinn-Phong specular
+            if (mat.specular > 0.0f) {
+                Vec3 halfVec = (sunDir + viewDir).normalized();
+                float NdotH = std::max(0.0f, normal.dot(halfVec));
+                float spec = std::pow(NdotH, mat.shininess);
+                result += sunColor * (spec * mat.specular * sunIntensity);
+            }
         }
     }
 
-    // --- Point lights ---
-    for (const auto& light : lights) {
-        Vec3 toLight = light.position - worldPos;
-        float dist = toLight.length();
-        if (dist > light.radius || dist < 0.001f) continue;
+    // --- Point lights via spatial grid (only nearby lights) ---
+    float invCell = 1.0f / lightCellSize;
+    int cx = (int)std::floor(worldPos.x * invCell);
+    int cz = (int)std::floor(worldPos.z * invCell);
 
-        Vec3 L = toLight * (1.0f / dist);
+    ++m_shadeStamp;
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -1; dz <= 1; dz++) {
+            auto it = lightGrid.find({cx + dx, cz + dz});
+            if (it == lightGrid.end()) continue;
+            for (const PointLight* light : it->second) {
+                size_t idx = (size_t)(light - lightsBase);
+                if (m_lightVisited[idx] == m_shadeStamp) continue;
+                m_lightVisited[idx] = m_shadeStamp;
 
-        float atten = 1.0f / (1.0f + dist * dist * 0.3f);
-        float fade = 1.0f - (dist / light.radius);
-        fade = fade * fade;
-        atten *= fade * light.intensity;
+                Vec3 toLight = light->position - worldPos;
+                float dist = toLight.length();
+                if (dist > light->radius || dist < 0.001f) continue;
 
-        float NdotL = std::max(0.0f, normal.dot(L));
-        Color3 diffuse = mat.color * light.color * (NdotL * atten);
-        result += diffuse;
+                Vec3 L = toLight * (1.0f / dist);
 
-        if (mat.specular > 0.0f && NdotL > 0.0f) {
-            Vec3 halfVec = (L + viewDir).normalized();
-            float NdotH = std::max(0.0f, normal.dot(halfVec));
-            float spec = std::pow(NdotH, mat.shininess);
-            result += light.color * (spec * mat.specular * atten);
+                float NdotL = std::max(0.0f, normal.dot(L));
+                if (NdotL <= 0.0f) continue;
+
+                float atten = 1.0f / (1.0f + dist * dist * 0.3f);
+                float fade = 1.0f - (dist / light->radius);
+                fade = fade * fade;
+                atten *= fade * light->intensity;
+
+                Color3 diffuse = mat.color * light->color * (NdotL * atten);
+                result += diffuse;
+
+                if (mat.specular > 0.0f) {
+                    Vec3 halfVec = (L + viewDir).normalized();
+                    float NdotH = std::max(0.0f, normal.dot(halfVec));
+                    float spec = std::pow(NdotH, mat.shininess);
+                    result += light->color * (spec * mat.specular * atten);
+                }
+            }
         }
     }
 
@@ -116,6 +202,13 @@ void Renderer::renderSky(const Camera& camera, Framebuffer& fb) {
     float aspect = (float)w / ((float)h * charAspect);
     float fovScale = std::tan(camera.fov / 2.0f);
 
+    // City light pollution glow color (warm neon bleed near horizon)
+    Color3 cityGlow(0.2f, 0.1f, 0.05f);
+
+    // Precompute sun thresholds to avoid per-pixel acos
+    float cosSunRadius = std::cos(sunAngularRadius);
+    float cosSunHalo   = std::cos(sunAngularRadius * 4.0f);
+
     for (int y = 0; y < h; y++) {
         float ndy = 1.0f - 2.0f * (y + 0.5f) / h;
         for (int x = 0; x < w; x++) {
@@ -128,21 +221,33 @@ void Renderer::renderSky(const Camera& camera, Framebuffer& fb) {
                 float t = std::min(1.0f, vert * 2.5f);
                 t = t * t;
                 skyColor = lerp(skyHorizon, skyZenith, t);
+
+                // City light pollution: warm glow band between horizon and vert 0.05
+                if (vert < 0.05f) {
+                    float glow = 1.0f - (vert / 0.05f);
+                    glow = glow * glow;
+                    skyColor = lerp(skyColor, cityGlow, glow * 0.3f);
+                }
             } else {
                 float t = std::min(1.0f, -vert * 4.0f);
                 skyColor = lerp(skyHorizon, groundFar, t);
             }
 
-            float sunAngle = std::acos(std::max(-1.0f, std::min(1.0f, dir.dot(sunDir))));
-            if (sunAngle < sunAngularRadius) {
+            // Sun disc check using dot product (no acos needed for most pixels)
+            float sunDot = dir.dot(sunDir);
+            if (sunDot > cosSunRadius) {
+                // Inside sun disc — only use acos for these few pixels
+                float sunAngle = std::acos(std::max(-1.0f, std::min(1.0f, sunDot)));
                 float edge = sunAngle / sunAngularRadius;
                 float intensity = 1.0f - edge * edge;
-                Color3 sunGlow(1.0f, 0.95f, 0.7f);
+                Color3 sunGlow(1.0f, 0.6f, 0.3f);
                 skyColor = lerp(skyColor, sunGlow, intensity * 0.9f + 0.1f);
-            } else if (sunAngle < sunAngularRadius * 4.0f) {
+            } else if (sunDot > cosSunHalo) {
+                // Halo region — use acos only for halo pixels
+                float sunAngle = std::acos(std::max(-1.0f, std::min(1.0f, sunDot)));
                 float t = 1.0f - (sunAngle - sunAngularRadius) / (sunAngularRadius * 3.0f);
                 t = t * t * t;
-                Color3 glowColor(0.9f, 0.75f, 0.4f);
+                Color3 glowColor(0.6f, 0.35f, 0.15f);
                 skyColor = lerp(skyColor, glowColor, t * 0.4f);
             }
 
@@ -153,15 +258,11 @@ void Renderer::renderSky(const Camera& camera, Framebuffer& fb) {
 
 // --- Near-plane clipping ---
 
-// A clip-space vertex for clipping purposes
 struct ClipVertex {
-    Vec4 clip;      // clip-space position
-    Vec3 world;     // world-space position (for shading interpolation)
+    Vec4 clip;
+    Vec3 world;
 };
 
-// Clip a polygon against the near plane (w >= nearW).
-// Input: polygon vertices in clip space. Output: clipped polygon.
-// Uses Sutherland-Hodgman algorithm.
 static void clipNearPlane(const ClipVertex* in, int inCount,
                           ClipVertex* out, int& outCount, float nearW) {
     outCount = 0;
@@ -179,7 +280,6 @@ static void clipNearPlane(const ClipVertex* in, int inCount,
         }
 
         if (currInside != nextInside) {
-            // Compute intersection
             float t = (nearW - curr.clip.w) / (next.clip.w - curr.clip.w);
             ClipVertex interp;
             interp.clip.x = curr.clip.x + t * (next.clip.x - curr.clip.x);
@@ -196,6 +296,7 @@ static void clipNearPlane(const ClipVertex* in, int inCount,
 
 void Renderer::render(const std::vector<SceneObject>& objects,
                        const std::vector<PointLight>& lights,
+                       const LightGrid& lightGrid,
                        const Camera& camera,
                        Framebuffer& fb) {
     renderSky(camera, fb);
@@ -209,10 +310,46 @@ void Renderer::render(const std::vector<SceneObject>& objects,
     Vec3 camPos = camera.position();
     float nearW = camera.nearPlane;
 
+    // --- Optimization 1: Extract frustum planes for culling ---
+    FrustumPlane frustum[6];
+    extractFrustumPlanes(viewProj, frustum);
+
+    // Light grid is pre-built and passed in (static lights, built once during world gen)
+    const PointLight* lightsBase = lights.empty() ? nullptr : lights.data();
+
+    // Resize light visited stamp vector if needed (no per-shade-call allocation)
+    if (m_lightVisited.size() < lights.size()) {
+        m_lightVisited.resize(lights.size(), 0);
+    }
+
     for (const auto& obj : objects) {
         const Mesh* mesh = obj.mesh;
         const Mat4& model = obj.transform;
         const Material& mat = obj.material;
+
+        // --- Optimization 1+2: Frustum + distance culling per object ---
+        // Compute world-space bounding sphere center (transform local origin)
+        Vec4 centerW = model * Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        Vec3 center = centerW.xyz();
+
+        // Compute bounding sphere radius (mesh radius * max scale)
+        float localRadius = meshBoundingRadius(*mesh);
+        float scale = maxScaleFactor(model);
+        float worldRadius = localRadius * scale;
+
+        // Distance culling: skip objects fully beyond fog end
+        float distToCam = (center - camPos).length();
+        if (distToCam - worldRadius > fogEnd) continue;
+
+        // Frustum culling: test bounding sphere against all 6 planes
+        bool culled = false;
+        for (int i = 0; i < 6; i++) {
+            if (frustum[i].distanceToPoint(center) < -worldRadius) {
+                culled = true;
+                break;
+            }
+        }
+        if (culled) continue;
 
         Mat4 mvp = viewProj * model;
 
@@ -231,22 +368,24 @@ void Renderer::render(const std::vector<SceneObject>& objects,
             Vec3 edge2 = worldVerts[2] - worldVerts[0];
             Vec3 normal = edge1.cross(edge2).normalized();
 
-            // Check facing direction — flip normal if back-facing (to render both sides)
+            // Back-face culling: skip triangles facing away from the camera
             Vec3 toCamera = (camPos - worldVerts[0]).normalized();
             float facing = normal.dot(toCamera);
+            if (facing < 0.0f) continue;  // back-facing, skip
             Vec3 shadingNormal = normal;
-            if (facing < 0.0f) {
-                shadingNormal = normal * -1.0f; // flip for correct lighting on back face
-            }
 
             // Compute shading at triangle centroid (flat shading)
             Vec3 centroid = (worldVerts[0] + worldVerts[1] + worldVerts[2]) * (1.0f / 3.0f);
-            Color3 shadedColor = shade(centroid, shadingNormal, mat, camPos, lights);
 
-            // Fog
+            // --- Optimization 2: Per-triangle fog early-exit ---
             float dist = (centroid - camPos).length();
             float fogFactor = (dist - fogStart) / (fogEnd - fogStart);
             fogFactor = std::max(0.0f, std::min(1.0f, fogFactor));
+            if (fogFactor >= 0.999f) continue;  // fully fogged, skip
+
+            // Shade using spatial light grid instead of all lights
+            Color3 shadedColor = shade(centroid, shadingNormal, mat, camPos,
+                                       lightGrid, LIGHT_CELL_SIZE, lightsBase);
 
             // Transform to clip space
             ClipVertex clipVerts[3];
@@ -256,7 +395,7 @@ void Renderer::render(const std::vector<SceneObject>& objects,
             }
 
             // Clip against near plane
-            ClipVertex clipped[7]; // max 4 vertices after clipping a triangle against one plane
+            ClipVertex clipped[7];
             int clippedCount = 0;
             clipNearPlane(clipVerts, 3, clipped, clippedCount, nearW);
 

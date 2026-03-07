@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-// Key press events for menus (one-shot, never missed)
+// Key press events for menus and gameplay (one-shot, never missed)
 enum class KeyPress {
     Up,         // Arrow Up
     Down,       // Arrow Down
@@ -12,6 +12,13 @@ enum class KeyPress {
     Right,      // Arrow Right
     Confirm,    // Enter / Space
     Back,       // Esc
+    // Gameplay one-shot keys
+    KeyQ,       // Cycle weapon left
+    KeyE,       // Cycle weapon right
+    KeyF,       // Drop item
+    KeyG,       // Pick up item
+    MouseLeft,  // Left mouse button (attack/use)
+    Key1, Key2, Key3, Key4, Key5, Key6, Key7, Key8, Key9, // Direct hotbar select
 };
 
 struct InputState {
@@ -22,6 +29,9 @@ struct InputState {
     std::atomic<bool> right{false};     // D
     std::atomic<bool> up{false};        // Space
     std::atomic<bool> down{false};      // C
+
+    // Mouse buttons — true while physically held
+    std::atomic<bool> mouseLeftDown{false};
 
     // Mouse delta (accumulated since last frame)
     float mouseDx = 0;

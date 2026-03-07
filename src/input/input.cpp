@@ -82,6 +82,23 @@ static CGEventRef eventCallback(CGEventTapProxy, CGEventType type, CGEventRef ev
         return event;
     }
 
+    // Mouse buttons - only process when focused and mouse is captured
+    if (type == kCGEventLeftMouseDown || type == kCGEventLeftMouseUp) {
+        if (isFocused && g_inputInstance->mouseCapture()) {
+            InputState* state = g_inputInstance->m_sharedState;
+            if (state) {
+                bool pressed = (type == kCGEventLeftMouseDown);
+                state->mouseLeftDown.store(pressed, std::memory_order_relaxed);
+                if (pressed) {
+                    state->pushPress(KeyPress::MouseLeft);
+                }
+            }
+            // Swallow mouse click so it doesn't pass through to other apps
+            return NULL;
+        }
+        return event;
+    }
+
     // Keyboard - only process when focused
     if (type == kCGEventKeyDown || type == kCGEventKeyUp) {
         if (!isFocused) return event; // Ignore all keyboard input when unfocused
@@ -133,7 +150,7 @@ static CGEventRef eventCallback(CGEventTapProxy, CGEventType type, CGEventRef ev
             case kVK_ANSI_C:  state->down.store(pressed, std::memory_order_relaxed);     break;
             }
 
-            // Push one-shot press events for menu use (arrow keys + Enter + Esc)
+            // Push one-shot press events for menu use and gameplay
             if (pressed) {
                 switch (keyCode) {
                 case kVK_UpArrow:    state->pushPress(KeyPress::Up);      break;
@@ -143,6 +160,21 @@ static CGEventRef eventCallback(CGEventTapProxy, CGEventType type, CGEventRef ev
                 case kVK_Return:     state->pushPress(KeyPress::Confirm); break;
                 case kVK_Space:      state->pushPress(KeyPress::Confirm); break;
                 case kVK_Escape:     state->pushPress(KeyPress::Back);    break;
+                // Gameplay one-shot keys
+                case kVK_ANSI_Q:     state->pushPress(KeyPress::KeyQ);    break;
+                case kVK_ANSI_E:     state->pushPress(KeyPress::KeyE);    break;
+                case kVK_ANSI_F:     state->pushPress(KeyPress::KeyF);    break;
+                case kVK_ANSI_G:     state->pushPress(KeyPress::KeyG);    break;
+                // Direct hotbar selection (number keys)
+                case kVK_ANSI_1:     state->pushPress(KeyPress::Key1);    break;
+                case kVK_ANSI_2:     state->pushPress(KeyPress::Key2);    break;
+                case kVK_ANSI_3:     state->pushPress(KeyPress::Key3);    break;
+                case kVK_ANSI_4:     state->pushPress(KeyPress::Key4);    break;
+                case kVK_ANSI_5:     state->pushPress(KeyPress::Key5);    break;
+                case kVK_ANSI_6:     state->pushPress(KeyPress::Key6);    break;
+                case kVK_ANSI_7:     state->pushPress(KeyPress::Key7);    break;
+                case kVK_ANSI_8:     state->pushPress(KeyPress::Key8);    break;
+                case kVK_ANSI_9:     state->pushPress(KeyPress::Key9);    break;
                 }
             }
         }
@@ -159,6 +191,8 @@ void* mouseThreadFunc(void* arg) {
                        CGEventMaskBit(kCGEventLeftMouseDragged) |
                        CGEventMaskBit(kCGEventRightMouseDragged) |
                        CGEventMaskBit(kCGEventOtherMouseDragged) |
+                       CGEventMaskBit(kCGEventLeftMouseDown) |
+                       CGEventMaskBit(kCGEventLeftMouseUp) |
                        CGEventMaskBit(kCGEventKeyDown) |
                        CGEventMaskBit(kCGEventKeyUp);
 
@@ -397,6 +431,7 @@ void Input::poll(InputState& state) {
         state.right.store(false, std::memory_order_relaxed);
         state.up.store(false, std::memory_order_relaxed);
         state.down.store(false, std::memory_order_relaxed);
+        state.mouseLeftDown.store(false, std::memory_order_relaxed);
 
         // Drain the press queue and text input so stale events don't fire on refocus
         state.consumePresses();

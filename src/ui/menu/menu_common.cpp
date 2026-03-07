@@ -54,6 +54,7 @@ MenuScreen::PressFlags MenuScreen::consumePressFlags(InputState& input) {
             case KeyPress::Right:   f.right = true; break;
             case KeyPress::Confirm: f.confirm = true; break;
             case KeyPress::Back:    f.back = true; break;
+            default: break;  // Ignore game keys (Q/E/F/G/1-9/MouseLeft) in menus
         }
     }
     return f;

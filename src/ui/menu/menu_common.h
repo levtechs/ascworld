@@ -18,6 +18,7 @@ enum class MenuResult {
     ChangeUsername, // User wants to edit username
     Back,           // Navigate back one screen
     Disconnect,     // Cancel connection / disconnect
+    CustomizeChar,  // Open character customization
 };
 
 // ---- Base class for all menu screens ----

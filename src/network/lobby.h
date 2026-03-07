@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <functional>
 
 class Lobby {
 public:
@@ -18,6 +19,10 @@ public:
     // Set the local player name
     void setPlayerName(const std::string& name) { m_playerName = name; }
     const std::string& playerName() const { return m_playerName; }
+
+    // Set character appearance (packed byte)
+    void setAppearance(uint8_t appearance) { m_appearance = appearance; }
+    uint8_t appearance() const { return m_appearance; }
 
     // Browse rooms
     std::vector<RoomInfo> refreshRooms();
@@ -54,10 +59,19 @@ public:
     // Get connection state (for UI)
     ClientSession::State clientState() const;
 
+    // Send a reliable message to the network (world events)
+    void sendReliable(const std::vector<uint8_t>& data);
+
+    // Set callback for incoming world events
+    using WorldEventCallback = std::function<void(const uint8_t* data, size_t len)>;
+    void setWorldEventCallback(WorldEventCallback cb);
+
 private:
     FirebaseClient m_firebase;
     std::string m_playerName = "Player";
+    uint8_t m_appearance = 0;
 
     std::unique_ptr<HostSession> m_hostSession;
     std::unique_ptr<ClientSession> m_clientSession;
+    WorldEventCallback m_worldEventCallback;
 };

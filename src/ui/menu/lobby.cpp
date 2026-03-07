@@ -62,14 +62,15 @@ MenuResult LobbyScreen::update(InputState& input, int /*screenW*/, int /*screenH
         if (p.up) {
             m_focus = 1;  // back to room list
         }
-        if (p.left) { m_buttonIdx--; if (m_buttonIdx < 0) m_buttonIdx = 2; }
-        if (p.right) { m_buttonIdx++; if (m_buttonIdx > 2) m_buttonIdx = 0; }
+        if (p.left) { m_buttonIdx--; if (m_buttonIdx < 0) m_buttonIdx = 3; }
+        if (p.right) { m_buttonIdx++; if (m_buttonIdx > 3) m_buttonIdx = 0; }
 
         if (p.confirm) {
             switch (m_buttonIdx) {
                 case 0: return MenuResult::HostGame;
-                case 1: m_refreshRequested = true; return MenuResult::None;
-                case 2: return MenuResult::Back;
+                case 1: return MenuResult::CustomizeChar;
+                case 2: m_refreshRequested = true; return MenuResult::None;
+                case 3: return MenuResult::Back;
             }
         }
     }
@@ -97,8 +98,8 @@ void LobbyScreen::render(int screenW, int screenH) const {
         if (scrollOffset > totalRooms - maxVisible) scrollOffset = totalRooms - maxVisible;
     }
 
-    const char* buttonLabels[] = { "[Host Game]", "[Refresh]", "[Back]" };
-    int buttonCount = 3;
+    const char* buttonLabels[] = { "[Host Game]", "[Customize]", "[Refresh]", "[Back]" };
+    int buttonCount = 4;
     int buttonY = screenH - 5;
 
     for (int y = 0; y < screenH; y++) {

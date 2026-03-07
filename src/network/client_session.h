@@ -19,6 +19,9 @@ public:
     // Browse available rooms
     std::vector<RoomInfo> listRooms();
 
+    // Set character appearance (call before joinRoom)
+    void setAppearance(uint8_t appearance) { m_localAppearance = appearance; }
+
     // Join a room by ID. Returns true if connection initiated.
     bool joinRoom(const std::string& roomId, const std::string& playerName,
                   const std::string& password = "");
@@ -57,6 +60,13 @@ public:
     using StateCallback = std::function<void(State newState)>;
     void onStateChange(StateCallback cb) { m_stateCallback = cb; }
 
+    // Callback for world-state events received from host
+    using WorldEventCallback = std::function<void(const uint8_t* data, size_t len)>;
+    void setWorldEventCallback(WorldEventCallback cb) { m_onWorldEvent = std::move(cb); }
+
+    // Send a reliable message to the host
+    void sendReliable(const std::vector<uint8_t>& data);
+
 private:
     FirebaseClient& m_firebase;
     Signaling m_signaling;
@@ -80,6 +90,12 @@ private:
 
     // Timing
     float m_sendTimer = 0;
+
+    // Character appearance (packed byte)
+    uint8_t m_localAppearance = 0;
+
+    // World event callback
+    WorldEventCallback m_onWorldEvent;
 
     // Handle messages from host
     void onHostMessage(const uint8_t* data, size_t len, bool reliable);

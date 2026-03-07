@@ -41,14 +41,40 @@ add_executable(ascii3d
 
     # World
     src/world/world.cpp
-    src/world/terrain.cpp
-    src/world/vegetation.cpp
-    src/world/structures.cpp
+    src/world/city_layout.cpp
+    src/world/buildings.cpp
+
+
+    # Prefabs
+    src/world/prefabs/street_props/streetlamp.cpp
+    src/world/prefabs/street_props/trash_can.cpp
+    src/world/prefabs/street_props/bollard.cpp
+    src/world/prefabs/street_props/bench.cpp
+    src/world/prefabs/street_props/fire_barrel.cpp
+    src/world/prefabs/street_props/barricade.cpp
+    src/world/prefabs/street_props/dumpster.cpp
+    src/world/prefabs/vehicles/vehicle_husk.cpp
+    src/world/prefabs/vehicles/crate.cpp
+    src/world/prefabs/structural/rubble_pile.cpp
+    src/world/prefabs/structural/door_frame.cpp
+    src/world/prefabs/structural/staircase.cpp
+    src/world/prefabs/building_mounted/pipe_run.cpp
+    src/world/prefabs/building_mounted/sign_board.cpp
+    src/world/prefabs/building_mounted/antenna.cpp
+    src/world/prefabs/interior/debris.cpp
+    src/world/prefabs/interior/pillar.cpp
+    src/world/prefabs/interior/terminal.cpp
+    src/world/prefabs/interior/shelf_rack.cpp
+    src/world/prefabs/interior/table.cpp
 
     # Game
     src/game/player.cpp
     src/game/camera.cpp
     src/game/save_system.cpp
+    src/game/inventory.cpp
+    src/game/weapon_meshes.cpp
+    src/game/world_state.cpp
+    src/game/combat.cpp
 
     # Input
     src/input/input.cpp
@@ -65,6 +91,20 @@ add_executable(ascii3d
     src/ui/menu/connecting.cpp
     src/ui/menu/generating.cpp
     src/ui/menu/pause_overlay.cpp
+
+    # UI (HUD)
+    src/ui/hud/hud.cpp
+    src/ui/hud/crosshair.cpp
+    src/ui/hud/hotbar.cpp
+    src/ui/hud/cooldown_indicator.cpp
+    src/ui/hud/pickup_prompt.cpp
+    src/ui/hud/health_bar.cpp
+    src/ui/hud/kill_counter.cpp
+    src/ui/hud/death_overlay.cpp
+    src/ui/hud/kill_feed.cpp
+
+    # UI (Menu - customize)
+    src/ui/menu/customize_screen.cpp
 
     # Network
     src/network/firebase_client.cpp

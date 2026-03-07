@@ -9,6 +9,7 @@
 #include <mutex>
 #include <vector>
 #include <memory>
+#include <functional>
 
 class HostSession {
 public:
@@ -36,8 +37,16 @@ public:
     uint32_t seed() const { return m_seed; }
     int playerCount() const;
 
+    // Set host's character appearance (call before createRoom or anytime)
+    void setHostAppearance(uint8_t appearance) { m_hostAppearance = appearance; }
+    uint8_t hostAppearance() const { return m_hostAppearance; }
+
     // Check if session is active
     bool isActive() const { return m_active; }
+
+    // Callback for world-state events received from peers
+    using WorldEventCallback = std::function<void(const uint8_t* data, size_t len)>;
+    void setWorldEventCallback(WorldEventCallback cb) { m_onWorldEvent = std::move(cb); }
 
 private:
     struct DisconnectInfo {
@@ -52,12 +61,14 @@ private:
     std::string m_roomId;
     std::string m_hostName;
     uint32_t m_seed = 0;
+    uint8_t m_hostAppearance = 0;
     bool m_active = false;
 
     // Connected peers
     struct PeerInfo {
         std::string name;
         PeerId id = PEER_ID_INVALID;
+        uint8_t appearance = 0; // packed CharacterAppearance byte
         std::shared_ptr<PeerChannel> channel;
         std::unique_ptr<RemotePlayer> player;
     };
@@ -70,15 +81,21 @@ private:
     float m_sendTimer = 0;
     float m_roomHeartbeatTimer = 0;
 
+    // World event callback
+    WorldEventCallback m_onWorldEvent;
+
     // Handle incoming connection
     void onNewPeer(const std::string& remotePeerId, const std::string& sdpOffer);
 
     // Handle messages from a peer
     void onPeerMessage(const std::string& remotePeerId, const uint8_t* data, size_t len, bool reliable);
 
-    // Broadcast a message to all connected peers
+public:
+    // Broadcast a message to all connected peers (public for Lobby to forward item events)
     void broadcastReliable(const std::vector<uint8_t>& data, const std::string& excludePeerId = "");
     void broadcastUnreliable(const std::vector<uint8_t>& data, const std::string& excludePeerId = "");
+
+private:
 
     // Remove a disconnected peer
     void removePeer(const std::string& remotePeerId);

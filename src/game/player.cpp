@@ -172,10 +172,23 @@ bool Player::checkAABBContact(const AABB& box, Contact& contact) const {
         xzNormal = Vec3(dx / distXZ, 0.0f, dz / distXZ);
     }
 
-    // Choose the axis with minimal penetration (least displacement to resolve)
-    // But prefer pushing up (standing on top) if the player is mostly above the box
-    float playerMidY = playerBottom + m_height * 0.5f;
-    float boxMidY = (box.min.y + box.max.y) * 0.5f;
+    // Step-up handling for stairs/small ledges.
+    // If we're moving horizontally into a low obstacle, prefer stepping up
+    // instead of treating it as a wall.
+    {
+        const float maxStepHeight = 0.45f;
+        float horizSpeedSq = m_velocity.x * m_velocity.x + m_velocity.z * m_velocity.z;
+        float stepUp = box.max.y - playerBottom;
+        bool canStepUp = !insideXZ
+            && horizSpeedSq > 0.01f
+            && stepUp > 0.0f
+            && stepUp <= maxStepHeight;
+        if (canStepUp) {
+            contact.normal = Vec3(0, 1, 0);
+            contact.penetration = stepUp + 0.01f;
+            return true;
+        }
+    }
 
     // If player feet are near the top of the box, prefer vertical push-up (stand on it)
     if (playerBottom >= box.max.y - 0.5f && penBottom < penXZ) {
@@ -202,20 +215,11 @@ bool Player::checkAABBContact(const AABB& box, Contact& contact) const {
 }
 
 bool Player::checkSlopeContact(const SlopeCollider& slope, Contact& contact) const {
-    if (!slope.containsXZ(m_pos.x, m_pos.z)) return false;
-
-    float surfaceY = slope.heightAt(m_pos.x, m_pos.z);
-    float feetY = m_pos.y;
-
-    // Only interact if player feet are at or below the slope surface
-    if (feetY > surfaceY + 0.01f) return false;
-
-    float penetration = surfaceY - feetY;
-    if (penetration < -0.01f) return false; // player is well above
-
-    contact.normal = slope.surfaceNormal();
-    contact.penetration = std::max(0.0f, penetration) + 0.01f;
-    return true;
+    (void)slope;
+    (void)contact;
+    // Slope colliders are disabled; stair traversal is handled via regular
+    // AABB contacts + step-up behavior in checkAABBContact.
+    return false;
 }
 
 void Player::gatherContacts(const std::vector<AABB>& colliders,
@@ -313,8 +317,12 @@ void Player::update(const InputState& input, float dt,
         if (contacts.empty()) break;
 
         for (const auto& c : contacts) {
+            // Clamp penetration to avoid violent teleportation when player
+            // clips deeply inside geometry (e.g. spawning inside a wall).
+            float pen = std::min(c.penetration, 0.5f);
+
             // Push player out of geometry along contact normal
-            m_pos += c.normal * c.penetration;
+            m_pos += c.normal * pen;
 
             // Cancel velocity component going into the surface
             float velIntoSurface = m_velocity.dot(c.normal);

@@ -2,6 +2,7 @@
 #include "core/vec_math.h"
 #include "rendering/mesh.h"
 #include "input/input.h"
+#include "game/inventory.h"
 #include <vector>
 
 // Axis-aligned bounding box for collision
@@ -60,6 +61,10 @@ public:
 
     const SceneObject& sceneObject() const { return m_sceneObj; }
 
+    // Inventory (weapons/items)
+    Inventory& inventory() { return m_inventory; }
+    const Inventory& inventory() const { return m_inventory; }
+
     float radius() const { return m_radius; }
     float height() const { return m_height; }
 
@@ -85,6 +90,8 @@ private:
     bool m_crouching = false;
 
     bool m_onGround = false;
+
+    Inventory m_inventory;
 
     Mesh m_mesh;
     SceneObject m_sceneObj;

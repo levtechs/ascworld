@@ -1,4 +1,5 @@
 #include "network/client_session.h"
+#include "game/character_appearance.h"
 #include <algorithm>
 #include <random>
 #include <ctime>
@@ -135,10 +136,11 @@ bool ClientSession::joinRoom(const std::string& roomId, const std::string& playe
         if (connected) {
             setState(State::Connected);
 
-            // Send our name to the host
+            // Send our name and appearance to the host
             PlayerJoinMsg joinMsg;
             joinMsg.id = PEER_ID_INVALID; // host will assign real ID
             joinMsg.name = m_playerName;
+            joinMsg.appearance = m_localAppearance;
             if (m_hostChannel) {
                 m_hostChannel->sendReliable(joinMsg.serialize());
             }
@@ -227,12 +229,16 @@ void ClientSession::onHostMessage(const uint8_t* data, size_t len, bool /*reliab
             // Don't create a remote player for ourselves
             if (msg.id == m_localPeerId) return;
 
+            CharacterAppearance appearance = CharacterAppearance::deserialize(msg.appearance);
             std::lock_guard<std::mutex> lock(m_mutex);
             auto it = m_remotePlayers.find(msg.id);
             if (it == m_remotePlayers.end()) {
-                m_remotePlayers[msg.id] = std::make_unique<RemotePlayer>(msg.id, msg.name);
+                auto player = std::make_unique<RemotePlayer>(msg.id, msg.name);
+                player->setAppearance(appearance);
+                m_remotePlayers[msg.id] = std::move(player);
             } else {
                 it->second->setName(msg.name);
+                it->second->setAppearance(appearance);
             }
             break;
         }
@@ -244,6 +250,15 @@ void ClientSession::onHostMessage(const uint8_t* data, size_t len, bool /*reliab
             m_remotePlayers.erase(msg.id);
             break;
         }
+
+        case NetMsgType::EntitySpawn:
+        case NetMsgType::EntityRemove:
+        case NetMsgType::DamageEvent:
+        case NetMsgType::HealthState: {
+            if (m_onWorldEvent) m_onWorldEvent(data, len);
+            break;
+        }
+
         default:
             break;
     }
@@ -287,6 +302,12 @@ void ClientSession::leave() {
     m_hasWorldSeed = false;
     m_localPeerId = PEER_ID_INVALID;
     setState(State::Disconnected);
+}
+
+void ClientSession::sendReliable(const std::vector<uint8_t>& data) {
+    if (m_hostChannel && m_hostChannel->isConnected()) {
+        m_hostChannel->sendReliable(data);
+    }
 }
 
 void ClientSession::setState(State s) {

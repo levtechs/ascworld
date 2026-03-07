@@ -1,5 +1,7 @@
 #pragma once
 #include "network/net_common.h"
+#include "game/item.h"
+#include "game/character_appearance.h"
 #include "rendering/mesh.h"
 #include "core/vec_math.h"
 #include <string>
@@ -15,7 +17,7 @@ public:
     // Interpolate position for smooth rendering (call each frame)
     void update(float dt);
 
-    // Get scene objects for rendering (body cylinder + head sphere)
+    // Get scene objects for rendering (body + head)
     // These point to internal meshes, valid for the lifetime of this object
     const SceneObject& bodyObject() const { return m_bodyObj; }
     const SceneObject& headObject() const { return m_headObj; }
@@ -27,10 +29,19 @@ public:
     float yaw() const { return m_displayYaw; }
     float pitch() const { return m_displayPitch; }
 
+    // Weapon state (decoded from flags)
+    ItemType activeWeapon() const { return m_activeWeapon; }
+    bool isAttacking() const { return m_isAttacking; }
+    bool isDead() const { return m_isDead; }
+
+    // Appearance
+    void setAppearance(const CharacterAppearance& appearance);
+    const CharacterAppearance& appearance() const { return m_appearance; }
+
     // Check if player data is stale (no updates for a while)
     bool isStale(float timeoutSeconds = 5.0f) const;
 
-    // Get the unique color for this player (based on peer ID)
+    // Get the player color (from appearance)
     Color3 playerColor() const;
 
 private:
@@ -51,11 +62,23 @@ private:
     // Timing
     std::chrono::steady_clock::time_point m_lastUpdate;
 
+    // Weapon state
+    ItemType m_activeWeapon = ItemType::None;
+    bool m_isAttacking = false;
+    bool m_isDead = false;
+
+    // Appearance
+    CharacterAppearance m_appearance;
+
+    // Death animation
+    float m_deathAnimProgress = 0.0f; // 0 = standing, 1 = fully fallen
+
     // Rendering
     Mesh m_bodyMesh;
     Mesh m_headMesh;
     SceneObject m_bodyObj;
     SceneObject m_headObj;
 
+    void rebuildMeshes();
     void updateTransform();
 };

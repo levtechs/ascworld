@@ -30,6 +30,9 @@ public:
     float getDepth(int x, int y) const;
     void render() const;
 
+    // Apply a color tint to the entire framebuffer (multiply + bias towards tint color)
+    void applyTint(const Color3& tint, float strength);
+
     int width() const { return m_width; }
     int height() const { return m_height; }
 

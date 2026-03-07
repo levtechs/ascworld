@@ -15,6 +15,17 @@ Vec3 Mesh::faceNormal(int faceIdx) const {
     return edge1.cross(edge2).normalized();
 }
 
+float Mesh::computeBoundingRadius() {
+    if (boundingRadius >= 0.0f) return boundingRadius;
+    float maxDistSq = 0.0f;
+    for (const auto& v : vertices) {
+        float dsq = v.x * v.x + v.y * v.y + v.z * v.z;
+        if (dsq > maxDistSq) maxDistSq = dsq;
+    }
+    boundingRadius = std::sqrt(maxDistSq);
+    return boundingRadius;
+}
+
 Mesh createCube() {
     Mesh m;
     // 8 vertices of a unit cube centered at origin
@@ -165,4 +176,42 @@ Mesh createSphere(int rings, int sectors, float radius) {
         }
     }
     return m;
+}
+
+// --------------------------------------------------------------------------
+// MeshCache implementation
+// --------------------------------------------------------------------------
+
+MeshCache::MeshCache() {
+    m_storage.push_back(createCube());
+    m_cube = &m_storage.back();
+    m_cube->computeBoundingRadius();
+
+    m_storage.push_back(createWedge());
+    m_wedge = &m_storage.back();
+    m_wedge->computeBoundingRadius();
+}
+
+const Mesh* MeshCache::cylinder(float radius, float height, int sectors) {
+    CylinderKey key{radius, height, sectors};
+    auto it = m_cylinders.find(key);
+    if (it != m_cylinders.end()) return it->second;
+
+    m_storage.push_back(createCylinder(radius, height, sectors));
+    Mesh* p = &m_storage.back();
+    p->computeBoundingRadius();
+    m_cylinders[key] = p;
+    return p;
+}
+
+const Mesh* MeshCache::sphere(int rings, int sectors, float radius) {
+    SphereKey key{rings, sectors, radius};
+    auto it = m_spheres.find(key);
+    if (it != m_spheres.end()) return it->second;
+
+    m_storage.push_back(createSphere(rings, sectors, radius));
+    Mesh* p = &m_storage.back();
+    p->computeBoundingRadius();
+    m_spheres[key] = p;
+    return p;
 }

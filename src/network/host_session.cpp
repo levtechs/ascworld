@@ -1,4 +1,5 @@
 #include "network/host_session.h"
+#include "game/character_appearance.h"
 #include <random>
 #include <chrono>
 #include <ctime>
@@ -107,6 +108,7 @@ void HostSession::onNewPeer(const std::string& remotePeerId, const std::string& 
             PlayerJoinMsg hostJoin;
             hostJoin.id = PEER_ID_HOST;
             hostJoin.name = m_hostName;
+            hostJoin.appearance = m_hostAppearance;
             bootstrapMsgs.push_back(hostJoin.serialize());
 
             for (auto& [otherPeerId, otherPeer] : m_peers) {
@@ -115,6 +117,7 @@ void HostSession::onNewPeer(const std::string& remotePeerId, const std::string& 
                 PlayerJoinMsg joinMsg;
                 joinMsg.id = otherPeer.id;
                 joinMsg.name = otherPeer.name;
+                joinMsg.appearance = otherPeer.appearance;
                 bootstrapMsgs.push_back(joinMsg.serialize());
             }
 
@@ -128,6 +131,7 @@ void HostSession::onNewPeer(const std::string& remotePeerId, const std::string& 
             PlayerJoinMsg newJoin;
             newJoin.id = assignedId;
             newJoin.name = p.name;
+            newJoin.appearance = p.appearance;
             newJoinData = newJoin.serialize();
 
             for (auto& [otherPeerId, otherPeer] : m_peers) {
@@ -234,8 +238,11 @@ void HostSession::onPeerMessage(const std::string& remotePeerId, const uint8_t* 
             auto it = m_peers.find(remotePeerId);
             if (it != m_peers.end()) {
                 it->second.name = msg.name;
+                it->second.appearance = msg.appearance;
                 if (it->second.player) {
                     it->second.player->setName(msg.name);
+                    CharacterAppearance appearance = CharacterAppearance::deserialize(msg.appearance);
+                    it->second.player->setAppearance(appearance);
                 }
             }
             break;
@@ -243,6 +250,17 @@ void HostSession::onPeerMessage(const std::string& remotePeerId, const uint8_t* 
 
         case NetMsgType::PlayerLeave: {
             removePeer(remotePeerId);
+            break;
+        }
+
+        case NetMsgType::EntitySpawn:
+        case NetMsgType::EntityRemove:
+        case NetMsgType::DamageEvent:
+        case NetMsgType::HealthState: {
+            if (len < 2) return;
+            std::vector<uint8_t> msg(data, data + len);
+            broadcastReliable(msg, remotePeerId);
+            if (m_onWorldEvent) m_onWorldEvent(data, len);
             break;
         }
 

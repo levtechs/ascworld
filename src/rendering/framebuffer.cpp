@@ -4,6 +4,18 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
+#include <array>
+
+// Precomputed gamma LUT: linear [0..4095] -> sRGB [0..255]
+static const auto GAMMA_LUT = [] {
+    std::array<uint8_t, 4096> lut{};
+    for (int i = 0; i < 4096; i++) {
+        float linear = static_cast<float>(i) / 4095.0f;
+        float s = std::pow(linear, 1.0f / 2.2f);
+        lut[i] = static_cast<uint8_t>(std::min(255, std::max(0, static_cast<int>(s * 255.0f + 0.5f))));
+    }
+    return lut;
+}();
 
 // Extended ASCII brightness ramp - 24 characters for finer gradation
 // From empty/dark to dense/bright
@@ -55,8 +67,8 @@ void Framebuffer::render() const {
     int prevBgR = -1, prevBgG = -1, prevBgB = -1;
 
     auto toSRGB = [](float linear) -> int {
-        float s = std::pow(std::max(0.0f, linear), 1.0f / 2.2f);
-        return std::min(255, std::max(0, (int)(s * 255.0f + 0.5f)));
+        int idx = static_cast<int>(std::max(0.0f, std::min(1.0f, linear)) * 4095.0f + 0.5f);
+        return GAMMA_LUT[idx];
     };
 
     for (int y = 0; y < m_height; y++) {
@@ -125,6 +137,14 @@ void Framebuffer::render() const {
 
     fwrite(output.data(), 1, output.size(), stdout);
     fflush(stdout);
+}
+
+void Framebuffer::applyTint(const Color3& tint, float strength) {
+    for (auto& c : m_colors) {
+        c.r = c.r * (1.0f - strength) + c.r * tint.r * strength;
+        c.g = c.g * (1.0f - strength) + c.g * tint.g * strength;
+        c.b = c.b * (1.0f - strength) + c.b * tint.b * strength;
+    }
 }
 
 char Framebuffer::luminanceToChar(float lum) const {

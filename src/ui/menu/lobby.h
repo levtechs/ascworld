@@ -24,7 +24,7 @@ private:
     std::string m_playerName;
     int m_roomSelected = 0;
     int m_focus = 1;        // 0=username, 1=room list, 2=buttons
-    int m_buttonIdx = 0;    // 0=Host, 1=Refresh, 2=Back
+    int m_buttonIdx = 0;    // 0=Host, 1=Customize, 2=Refresh, 3=Back
 
     std::string m_joinRoomId;
     bool m_joinNeedsPassword = false;

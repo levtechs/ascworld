@@ -28,6 +28,7 @@ std::string Lobby::hostGame(const std::string& roomName, uint32_t seed,
     disconnect();
 
     m_hostSession = std::make_unique<HostSession>(m_firebase);
+    m_hostSession->setHostAppearance(m_appearance);
     std::string roomId = m_hostSession->createRoom(roomName, m_playerName, seed, isPublic, password);
 
     if (roomId.empty()) {
@@ -35,6 +36,9 @@ std::string Lobby::hostGame(const std::string& roomName, uint32_t seed,
         return "";
     }
 
+    if (m_worldEventCallback) {
+        m_hostSession->setWorldEventCallback(m_worldEventCallback);
+    }
     m_hostSession->startAccepting();
     return roomId;
 }
@@ -44,6 +48,10 @@ bool Lobby::joinGame(const std::string& roomId, const std::string& password) {
     disconnect();
 
     m_clientSession = std::make_unique<ClientSession>(m_firebase);
+    m_clientSession->setAppearance(m_appearance);
+    if (m_worldEventCallback) {
+        m_clientSession->setWorldEventCallback(m_worldEventCallback);
+    }
     if (!m_clientSession->joinRoom(roomId, m_playerName, password)) {
         m_clientSession.reset();
         return false;
@@ -122,4 +130,25 @@ std::string Lobby::roomName() const {
         return m_clientSession->roomName();
     }
     return ""; // host knows its own name
+}
+
+void Lobby::sendReliable(const std::vector<uint8_t>& data) {
+    if (m_hostSession) {
+        // Host broadcasts directly to all peers
+        m_hostSession->broadcastReliable(data);
+    } else if (m_clientSession) {
+        // Client sends to host (who will relay)
+        m_clientSession->sendReliable(data);
+    }
+}
+
+void Lobby::setWorldEventCallback(WorldEventCallback cb) {
+    m_worldEventCallback = cb;
+    // Wire up to whichever session currently exists
+    if (m_hostSession) {
+        m_hostSession->setWorldEventCallback(cb);
+    }
+    if (m_clientSession) {
+        m_clientSession->setWorldEventCallback(cb);
+    }
 }
