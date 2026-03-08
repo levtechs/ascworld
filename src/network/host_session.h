@@ -48,6 +48,17 @@ public:
     using WorldEventCallback = std::function<void(const uint8_t* data, size_t len)>;
     void setWorldEventCallback(WorldEventCallback cb) { m_onWorldEvent = std::move(cb); }
 
+    // Callback when a new peer needs entity bootstrap (called from network thread)
+    // peerId: assigned ID, playerUUID: unique player ID for state tracking
+    using PeerBootstrapCallback = std::function<void(PeerId peerId, const std::string& playerUUID)>;
+    void setPeerBootstrapCallback(PeerBootstrapCallback cb) { m_onPeerBootstrap = std::move(cb); }
+
+    // Send entity data to a specific peer (called from main thread after bootstrap callback)
+    void sendToPeer(PeerId peerId, const std::vector<uint8_t>& data);
+
+    // Get a peer's UUID by their peer ID
+    std::string getPeerUUID(PeerId peerId);
+
 private:
     struct DisconnectInfo {
         std::string peerId;
@@ -60,6 +71,7 @@ private:
 
     std::string m_roomId;
     std::string m_hostName;
+    std::string m_worldName;  // display name for the world
     uint32_t m_seed = 0;
     uint8_t m_hostAppearance = 0;
     bool m_active = false;
@@ -67,10 +79,13 @@ private:
     // Connected peers
     struct PeerInfo {
         std::string name;
+        std::string uuid;  // unique player ID for state tracking
         PeerId id = PEER_ID_INVALID;
         uint8_t appearance = 0; // packed CharacterAppearance byte
         std::shared_ptr<PeerChannel> channel;
         std::unique_ptr<RemotePlayer> player;
+        float handshakeTimer = 0.0f; // time since peer was added (for handshake timeout)
+        bool bootstrapped = false;
     };
 
     std::mutex m_mutex;
@@ -83,6 +98,7 @@ private:
 
     // World event callback
     WorldEventCallback m_onWorldEvent;
+    PeerBootstrapCallback m_onPeerBootstrap;
 
     // Handle incoming connection
     void onNewPeer(const std::string& remotePeerId, const std::string& sdpOffer);

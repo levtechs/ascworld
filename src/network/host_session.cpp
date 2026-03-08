@@ -34,6 +34,7 @@ std::string HostSession::createRoom(const std::string& roomName, const std::stri
                                      uint32_t seed, bool isPublic, const std::string& password) {
     m_roomId = generateRoomId();
     m_hostName = hostName;
+    m_worldName = roomName;
     m_seed = seed;
 
     json roomData;
@@ -86,9 +87,6 @@ void HostSession::onNewPeer(const std::string& remotePeerId, const std::string& 
 
         std::shared_ptr<PeerChannel> newPeerChannel;
         std::vector<std::vector<uint8_t>> bootstrapMsgs;
-        std::vector<std::shared_ptr<PeerChannel>> otherChannels;
-        std::vector<uint8_t> newJoinData;
-        int count = 1;
 
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -103,6 +101,7 @@ void HostSession::onNewPeer(const std::string& remotePeerId, const std::string& 
 
             WorldSeedMsg seedMsg;
             seedMsg.seed = m_seed;
+            seedMsg.worldName = m_worldName;
             bootstrapMsgs.push_back(seedMsg.serialize());
 
             PlayerJoinMsg hostJoin;
@@ -120,28 +119,6 @@ void HostSession::onNewPeer(const std::string& remotePeerId, const std::string& 
                 joinMsg.appearance = otherPeer.appearance;
                 bootstrapMsgs.push_back(joinMsg.serialize());
             }
-
-            auto& p = it->second;
-            if (!p.player) {
-                p.player = std::make_unique<RemotePlayer>(assignedId, p.name);
-            } else {
-                p.player->setName(p.name);
-            }
-
-            PlayerJoinMsg newJoin;
-            newJoin.id = assignedId;
-            newJoin.name = p.name;
-            newJoin.appearance = p.appearance;
-            newJoinData = newJoin.serialize();
-
-            for (auto& [otherPeerId, otherPeer] : m_peers) {
-                if (otherPeerId == remotePeerId) continue;
-                if (otherPeer.channel && otherPeer.channel->isConnected()) {
-                    otherChannels.push_back(otherPeer.channel);
-                }
-            }
-
-            count = static_cast<int>(m_peers.size()) + 1;
         }
 
         if (newPeerChannel && newPeerChannel->isConnected()) {
@@ -149,14 +126,6 @@ void HostSession::onNewPeer(const std::string& remotePeerId, const std::string& 
                 newPeerChannel->sendReliable(msg);
             }
         }
-
-        for (auto& ch : otherChannels) {
-            if (ch && ch->isConnected()) {
-                ch->sendReliable(newJoinData);
-            }
-        }
-
-        m_firebase.patch("rooms/" + m_roomId, json{{"playerCount", count}});
     });
 
     channel->onReliableMessage([this, remotePeerId](const uint8_t* data, size_t len) {
@@ -234,15 +203,64 @@ void HostSession::onPeerMessage(const std::string& remotePeerId, const uint8_t* 
             PlayerJoinMsg msg;
             if (!PlayerJoinMsg::deserialize(data, len, msg)) return;
 
-            std::lock_guard<std::mutex> lock(m_mutex);
-            auto it = m_peers.find(remotePeerId);
-            if (it != m_peers.end()) {
-                it->second.name = msg.name;
-                it->second.appearance = msg.appearance;
-                if (it->second.player) {
-                    it->second.player->setName(msg.name);
-                    CharacterAppearance appearance = CharacterAppearance::deserialize(msg.appearance);
-                    it->second.player->setAppearance(appearance);
+            std::vector<std::shared_ptr<PeerChannel>> otherChannels;
+            std::vector<uint8_t> newJoinData;
+            std::string peerName;
+            PeerId assignedId = PEER_ID_INVALID;
+            bool shouldBootstrap = false;
+            int count = 1;
+
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                auto it = m_peers.find(remotePeerId);
+                if (it != m_peers.end()) {
+                    it->second.name = msg.name;
+                    it->second.appearance = msg.appearance;
+                    it->second.uuid = msg.uuid;
+                    assignedId = it->second.id;
+
+                    peerName = msg.uuid.empty() ? msg.name : msg.uuid;
+
+                    if (!it->second.player) {
+                        it->second.player = std::make_unique<RemotePlayer>(assignedId, msg.name);
+                        CharacterAppearance appearance = CharacterAppearance::deserialize(msg.appearance);
+                        it->second.player->setAppearance(appearance);
+                    } else {
+                        it->second.player->setName(msg.name);
+                        CharacterAppearance appearance = CharacterAppearance::deserialize(msg.appearance);
+                        it->second.player->setAppearance(appearance);
+                    }
+
+                    PlayerJoinMsg newJoin;
+                    newJoin.id = assignedId;
+                    newJoin.name = msg.name;
+                    newJoin.appearance = msg.appearance;
+                    newJoin.uuid = msg.uuid;
+                    newJoinData = newJoin.serialize();
+
+                    for (auto& [otherPeerId, otherPeer] : m_peers) {
+                        if (otherPeerId == remotePeerId) continue;
+                        if (otherPeer.channel && otherPeer.channel->isConnected()) {
+                            otherChannels.push_back(otherPeer.channel);
+                        }
+                    }
+
+                    if (!it->second.bootstrapped) {
+                        it->second.bootstrapped = true;
+                        shouldBootstrap = true;
+                    }
+                    count = static_cast<int>(m_peers.size()) + 1;
+                }
+            }
+
+            if (assignedId != PEER_ID_INVALID) {
+                for (auto& ch : otherChannels) {
+                    ch->sendReliable(newJoinData);
+                }
+
+                if (shouldBootstrap && m_onPeerBootstrap && !peerName.empty()) {
+                    m_onPeerBootstrap(assignedId, peerName);
+                    m_firebase.patch("rooms/" + m_roomId, json{{"playerCount", count}});
                 }
             }
             break;
@@ -260,6 +278,12 @@ void HostSession::onPeerMessage(const std::string& remotePeerId, const uint8_t* 
             if (len < 2) return;
             std::vector<uint8_t> msg(data, data + len);
             broadcastReliable(msg, remotePeerId);
+            if (m_onWorldEvent) m_onWorldEvent(data, len);
+            break;
+        }
+
+        case NetMsgType::PlayerFullState: {
+            // Client sending their state to host for caching — don't relay
             if (m_onWorldEvent) m_onWorldEvent(data, len);
             break;
         }
@@ -354,15 +378,21 @@ void HostSession::update(float dt, const PlayerNetState& localState) {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         for (auto& [peerId, peer] : m_peers) {
-            // Do NOT remove peers that are still handshaking.
-            // A peer gets a RemotePlayer only after onConnected(true).
-            // Before that, isConnected() can be false for a short period.
-            if (peer.player && (!peer.channel || !peer.channel->isConnected())) {
-                disconnectedIds.push_back(peerId);
-                continue;
-            }
-            if (peer.player && peer.player->isStale()) {
-                staleIds.push_back(peerId);
+            if (peer.player) {
+                // Connected peer -- check for disconnect or stale
+                if (!peer.channel || !peer.channel->isConnected()) {
+                    disconnectedIds.push_back(peerId);
+                    continue;
+                }
+                if (peer.player->isStale()) {
+                    staleIds.push_back(peerId);
+                }
+            } else {
+                // Still handshaking -- track how long and timeout if too slow
+                peer.handshakeTimer += dt;
+                if (peer.handshakeTimer >= 20.0f) {
+                    disconnectedIds.push_back(peerId);
+                }
             }
         }
     }
@@ -488,4 +518,30 @@ void HostSession::close() {
 
     m_firebase.del("rooms/" + m_roomId);
     m_firebase.del("signaling/" + m_roomId);
+}
+
+void HostSession::sendToPeer(PeerId peerId, const std::vector<uint8_t>& data) {
+    std::shared_ptr<PeerChannel> ch;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto& [remotePeerId, peer] : m_peers) {
+            if (peer.id == peerId) {
+                ch = peer.channel;
+                break;
+            }
+        }
+    }
+    if (ch && ch->isConnected()) {
+        ch->sendReliable(data);
+    }
+}
+
+std::string HostSession::getPeerUUID(PeerId peerId) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& [remotePeerId, peer] : m_peers) {
+        if (peer.id == peerId) {
+            return peer.uuid;
+        }
+    }
+    return "";
 }
