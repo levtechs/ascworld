@@ -27,8 +27,17 @@ NetworkingManager::NetworkingManager(const std::string& clientUUID, const std::s
     
     NETLOG("[NET] NetworkingManager created, uuid=" << clientUUID);
     rtc::InitLogger(rtc::LogLevel::Warning);
-    m_rtcConfig.iceServers.emplace_back("stun:stun.l.google.com:19302");
-    m_rtcConfig.iceServers.emplace_back("stun:stun1.l.google.com:19302");
+    
+    // Set STUN servers for direct P2P connections
+    m_rtcConfig.iceServers.emplace_back("stun.l.google.com", 19302);
+    m_rtcConfig.iceServers.emplace_back("stun1.l.google.com", 19302);
+    
+    // Set TURN servers for strict Symmetric NAT traversal (guarantees connectivity)
+    m_rtcConfig.iceServers.emplace_back("openrelay.metered.ca", 80, "openrelayproject", "openrelayproject");
+    m_rtcConfig.iceServers.emplace_back("openrelay.metered.ca", 443, "openrelayproject", "openrelayproject", rtc::IceServer::RelayType::TurnTcp);
+    
+    // Set explicit large message size for FullState packets over WAN (prevents SCTP queue overflow)
+    m_rtcConfig.maxMessageSize = 10 * 1024 * 1024; // 10 MB
 
     m_signalingThread = std::thread(&NetworkingManager::runSignalingLoop, this);
 }
@@ -639,6 +648,7 @@ void NetworkingManager::handleSignaling() {
         for (auto& info : peersToCheck) {
             auto candidates = FirebaseClient::get("signaling/" + m_lobbyUUID + "/candidates/" + info.peerUUID);
             if ((candidates.is_array() || candidates.is_object()) && (int)candidates.size() > info.startIdx) {
+                NETLOG("[SIG-H] Got " << candidates.size() - info.startIdx << " candidates from " << info.peerUUID.substr(0,8));
                 std::lock_guard<std::mutex> lock(m_peersMutex);
                 if (m_peers.find(info.peerUUID) != m_peers.end()) {
                     auto& peer = m_peers[info.peerUUID];
@@ -752,6 +762,7 @@ void NetworkingManager::handleSignaling() {
         }
         if (hasRemoteDesc) {
             auto candidates = FirebaseClient::get("signaling/" + m_lobbyUUID + "/host_candidates/" + m_clientUUID);
+            NETLOG("[SIG-C] Got candidates from Firebase: " << candidates.dump());
             if ((candidates.is_array() || candidates.is_object()) && (int)candidates.size() > candStartIdx) {
                 std::lock_guard<std::mutex> lock(m_peersMutex);
                 if (m_peers.find(m_lobbyUUID) != m_peers.end()) {
@@ -990,6 +1001,7 @@ void NetworkingManager::sendFullState(Peer& peer, const RootState& state) {
     
     json j = state;
     std::vector<uint8_t> cbor = json::to_cbor(j);
+    NETLOG("[Networking] sendFullState: cbor size is " << cbor.size() << " bytes");
     rtc::binary packet;
     packet.push_back(static_cast<std::byte>(PacketType::FullState));
     for (uint8_t b : cbor) packet.push_back(static_cast<std::byte>(b));
