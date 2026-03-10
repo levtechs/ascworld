@@ -1,5 +1,6 @@
 # Build
 build/
+!build/ascii3d
 ascii3d
 *.o
 *.d
