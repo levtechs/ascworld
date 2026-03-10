@@ -12,8 +12,8 @@ ascii3d
 *.swp
 *~
 
-# Environment / secrets
-.env
+# Environment
+# .env is tracked (contains no secrets)
 
 # macOS
 .DS_Store
