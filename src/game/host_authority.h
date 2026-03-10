@@ -64,6 +64,10 @@ public:
     // Returns true if the item was consumed.
     bool useItem(const std::string& playerUUID, int slot);
 
+    // Run authoritative damage detection on all entities.
+    // Builds player snapshots from state and processes damage events.
+    void processEntityDamage();
+
     // Get spawn position for the current world
     Vec3 getSpawnPosition() const;
 

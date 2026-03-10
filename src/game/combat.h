@@ -16,7 +16,7 @@ public:
 
     // Call once per frame. Handles attack input and animation timing.
     // Returns spawned world entities for this frame (0 or 1 currently).
-    std::vector<WorldEntity> update(Player& player, bool attackPressed, float dt, uint8_t ownerId);
+    std::vector<WorldEntity> update(Player& player, bool attackPressed, float dt, const std::string& ownerUUID);
 
     // --- Attack state (for rendering) ---
     bool isAttacking() const { return m_attacking; }
@@ -24,9 +24,9 @@ public:
     ItemType attackingWith() const { return m_attackType; }
 
 private:
-    void attackSaber(Player& player, std::vector<WorldEntity>& out, uint8_t ownerId);
-    void attackLaser(Player& player, std::vector<WorldEntity>& out, uint8_t ownerId);
-    void attackFlashbang(Player& player, std::vector<WorldEntity>& out, uint8_t ownerId);
+    void attackSaber(Player& player, std::vector<WorldEntity>& out, const std::string& ownerUUID);
+    void attackLaser(Player& player, std::vector<WorldEntity>& out, const std::string& ownerUUID);
+    void attackFlashbang(Player& player, std::vector<WorldEntity>& out, const std::string& ownerUUID);
 
     // Attack animation state
     bool m_attacking = false;

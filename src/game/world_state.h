@@ -10,17 +10,17 @@
 struct AABB;
 
 struct PlayerSnapshot {
-    uint8_t peerId = 0;
+    std::string uuid;
     Vec3 position;
     float radius = 0.3f;
     float height = 1.8f;
 };
 
 struct DamageEvent {
-    uint8_t sourceId = 0;
-    uint8_t targetId = 0;
+    std::string attackerUUID;
+    std::string victimUUID;
     float amount = 0.0f;
-    EntityType weaponType = EntityType::None;  // what caused the damage
+    EntityType weaponType = EntityType::None;
 };
 
 class WorldState {
@@ -52,11 +52,14 @@ public:
     const std::vector<WorldEntity>& entities() const { return *m_entities; }
     void clear();
 
+    // Process damage from a single entity against player snapshots.
+    // Public so HostAuthority can run authoritative damage detection.
+    void processDamageEntity(WorldEntity& entity, const std::vector<PlayerSnapshot>& players,
+                             std::vector<DamageEvent>& outDamageEvents);
+
 private:
     void updateProjectile(WorldEntity& entity, float dt, const std::vector<AABB>& colliders,
                           std::vector<WorldEntity>& spawnQueue);
-    void processDamageEntity(WorldEntity& entity, const std::vector<PlayerSnapshot>& players,
-                             std::vector<DamageEvent>& outDamageEvents);
 
     std::vector<WorldEntity>* m_entities;
     std::array<uint16_t, 8> m_ownerCounters{};

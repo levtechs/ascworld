@@ -3,9 +3,11 @@
 #include <iostream>
 #include <fstream>
 #include <unordered_set>
+#include <unordered_map>
 #include <unistd.h>
 #include <chrono>
 #include <thread>
+#include <algorithm>
 #include <rtc/rtc.hpp>
 #include <rtc/peerconnection.hpp>
 #include <rtc/datachannel.hpp>
@@ -211,7 +213,52 @@ void NetworkingManager::update(float dt, RootState& state) {
                     }
                 }
                 if (pkt.payload.contains("entities")) {
-                    state.entities = pkt.payload["entities"].get<std::vector<WorldEntity>>();
+                    auto hostEntities = pkt.payload["entities"].get<std::vector<WorldEntity>>();
+                    
+                    // Merge strategy: For entities that exist both locally and in host update,
+                    // preserve the local lifetime to avoid premature expiration due to network latency
+                    std::unordered_map<uint16_t, const WorldEntity*> localEntitiesById;
+                    for (const auto& ce : state.entities) {
+                        localEntitiesById[ce.id] = &ce;
+                    }
+                    
+                    std::vector<WorldEntity> merged;
+                    for (auto he : hostEntities) {
+                        // If this entity already exists locally, use the local lifetime
+                        // to prevent network latency from making entities disappear prematurely
+                        auto it = localEntitiesById.find(he.id);
+                        if (it != localEntitiesById.end()) {
+                            // Preserve local lifetime to prevent flickering from network latency
+                            if (it->second->lifetime >= 0.0f) {
+                                he.lifetime = std::max(he.lifetime, it->second->lifetime);
+                            }
+                            // Merge hitUUIDs: combine hits detected on both sides
+                            for (const auto& uid : it->second->hitUUIDs) {
+                                he.hitUUIDs.insert(uid);
+                            }
+                        }
+                        merged.push_back(he);
+                    }
+                    
+                    // Also keep very young local entities that host doesn't have yet (< 50ms)
+                    // This handles the case where client just spawned something the host hasn't received yet
+                    for (const auto& ce : state.entities) {
+                        float age = state.world.gameTime - ce.spawnTime;
+                        if (age < 0.05f && localEntitiesById.find(ce.id) != localEntitiesById.end()) {
+                            bool foundInHost = false;
+                            for (const auto& he : hostEntities) {
+                                if (he.id == ce.id) {
+                                    foundInHost = true;
+                                    break;
+                                }
+                            }
+                            if (!foundInHost) {
+                                merged.push_back(ce);
+                            }
+                        }
+                    }
+                    
+                    state.entities = merged;
                 }
                 if (pkt.payload.contains("metadata")) {
                     auto& md = pkt.payload["metadata"];
@@ -256,6 +303,26 @@ void NetworkingManager::update(float dt, RootState& state) {
                     hostPs.attackProgress = clientPs.attackProgress;
                     // inventory is now host-authoritative (modified via pickup/drop/death)
                 }
+                // Accept client entities (lasers, projectiles, etc.)
+                if (pkt.payload.contains("entities")) {
+                    auto clientEntities = pkt.payload["entities"].get<std::vector<WorldEntity>>();
+                    for (const auto& ce : clientEntities) {
+                        bool found = false;
+                        for (auto& he : state.entities) {
+                            if (he.id == ce.id) {
+                                // Entity already exists on host — merge hitUUIDs
+                                for (const auto& uid : ce.hitUUIDs) {
+                                    he.hitUUIDs.insert(uid);
+                                }
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            state.entities.push_back(ce);
+                        }
+                    }
+                }
             } else if (m_mode == Mode::Host && pkt.type == PacketType::RespawnRequest) {
                 NETLOG("[Networking] RespawnRequest from " << pkt.peerUUID);
                 m_respawnQueue.push_back(pkt.peerUUID);
@@ -282,7 +349,7 @@ void NetworkingManager::update(float dt, RootState& state) {
         }
     }
 
-    // Host: process queued death/respawn events from remote clients
+    // Host: process queued death/respawn events and entity damage
     if (m_mode == Mode::Host) {
         {
             std::vector<std::string> deaths;
@@ -300,6 +367,9 @@ void NetworkingManager::update(float dt, RootState& state) {
             }
             m_hostAuthority.processRespawnQueue(respawns);
         }
+
+        // Authoritative entity damage detection (lasers, explosions, sabers)
+        m_hostAuthority.processEntityDamage();
     }
 
     // Network send
@@ -785,6 +855,20 @@ void NetworkingManager::sendClientState(const RootState& state) {
 
     json delta;
     delta["player"] = it->second;
+    
+    // Also send entities spawned by this client (lasers, projectiles, etc.)
+    // Filter to only entities owned by this client or very recently spawned
+    std::vector<WorldEntity> clientEntities;
+    for (const auto& e : state.entities) {
+        // Send entities that are young (< 100ms) to ensure host receives them
+        float age = state.world.gameTime - e.spawnTime;
+        if (age < 0.1f) {
+            clientEntities.push_back(e);
+        }
+    }
+    if (!clientEntities.empty()) {
+        delta["entities"] = clientEntities;
+    }
     
     std::vector<uint8_t> cbor = json::to_cbor(delta);
     rtc::binary packet;

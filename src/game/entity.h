@@ -5,6 +5,8 @@
 #include <vector>
 #include <variant>
 #include <cstring>
+#include <string>
+#include <unordered_set>
 
 enum class EntityType : uint8_t {
     None = 0,
@@ -55,14 +57,15 @@ using EntityData = std::variant<
 struct WorldEntity {
     uint16_t id = 0;
     EntityType type = EntityType::None;
-    uint8_t ownerId = 0;
+    std::string ownerUUID;       // UUID of the player who spawned this entity
     Vec3 position;
     Vec3 velocity;
     float yaw = 0.0f;
     float lifetime = -1.0f;
     float spawnTime = 0.0f;
     uint8_t flags = 0;
-    uint8_t hitMask = 0;
+    uint8_t ownerId = 0;        // kept for entity ID generation only (0-7)
+    std::unordered_set<std::string> hitUUIDs;  // UUIDs of players already hit by this entity
     EntityData data;
 };
 

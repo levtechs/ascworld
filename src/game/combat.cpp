@@ -8,7 +8,7 @@ float CombatSystem::attackProgress() const {
     return 1.0f - (m_attackTimer / m_attackDuration);
 }
 
-std::vector<WorldEntity> CombatSystem::update(Player& player, bool attackPressed, float dt, uint8_t ownerId) {
+std::vector<WorldEntity> CombatSystem::update(Player& player, bool attackPressed, float dt, const std::string& ownerUUID) {
     std::vector<WorldEntity> spawned;
     Inventory& inv = player.inventory();
 
@@ -30,13 +30,13 @@ std::vector<WorldEntity> CombatSystem::update(Player& player, bool attackPressed
         if (!active.empty()) {
             switch (active.type) {
                 case ItemType::Saber:
-                    attackSaber(player, spawned, ownerId);
+                    attackSaber(player, spawned, ownerUUID);
                     break;
                 case ItemType::Laser:
-                    attackLaser(player, spawned, ownerId);
+                    attackLaser(player, spawned, ownerUUID);
                     break;
                 case ItemType::Flashbang:
-                    attackFlashbang(player, spawned, ownerId);
+                    attackFlashbang(player, spawned, ownerUUID);
                     break;
                 default:
                     break;
@@ -47,7 +47,7 @@ std::vector<WorldEntity> CombatSystem::update(Player& player, bool attackPressed
     return spawned;
 }
 
-void CombatSystem::attackSaber(Player& player, std::vector<WorldEntity>& out, uint8_t ownerId) {
+void CombatSystem::attackSaber(Player& player, std::vector<WorldEntity>& out, const std::string& ownerUUID) {
     Inventory& inv = player.inventory();
 
     // Start swing animation
@@ -62,7 +62,7 @@ void CombatSystem::attackSaber(Player& player, std::vector<WorldEntity>& out, ui
     // Spawn transient melee hit entity for world-state damage handling
     WorldEntity e;
     e.type = EntityType::SaberSwing;
-    e.ownerId = ownerId;
+    e.ownerUUID = ownerUUID;
     e.position = player.eyePosition();
     e.lifetime = 0.18f;
     SaberSwingData data;
@@ -74,7 +74,7 @@ void CombatSystem::attackSaber(Player& player, std::vector<WorldEntity>& out, ui
     out.push_back(e);
 }
 
-void CombatSystem::attackLaser(Player& player, std::vector<WorldEntity>& out, uint8_t ownerId) {
+void CombatSystem::attackLaser(Player& player, std::vector<WorldEntity>& out, const std::string& ownerUUID) {
     Inventory& inv = player.inventory();
 
     // Start brief recoil animation
@@ -100,7 +100,7 @@ void CombatSystem::attackLaser(Player& player, std::vector<WorldEntity>& out, ui
 
     WorldEntity e;
     e.type = EntityType::LaserBeam;
-    e.ownerId = ownerId;
+    e.ownerUUID = ownerUUID;
     e.position = muzzle;
     e.lifetime = 0.4f;  // visible for ~12 frames at 30fps, enough for network sync
     LaserBeamData data;
@@ -110,7 +110,7 @@ void CombatSystem::attackLaser(Player& player, std::vector<WorldEntity>& out, ui
     out.push_back(e);
 }
 
-void CombatSystem::attackFlashbang(Player& player, std::vector<WorldEntity>& out, uint8_t ownerId) {
+void CombatSystem::attackFlashbang(Player& player, std::vector<WorldEntity>& out, const std::string& ownerUUID) {
     Inventory& inv = player.inventory();
 
     // Must have at least one
@@ -127,7 +127,7 @@ void CombatSystem::attackFlashbang(Player& player, std::vector<WorldEntity>& out
 
     WorldEntity e;
     e.type = EntityType::Projectile;
-    e.ownerId = ownerId;
+    e.ownerUUID = ownerUUID;
     e.position = player.eyePosition() + player.forward() * 0.7f;
     e.velocity = player.forward() * 15.0f + Vec3{0.0f, 3.0f, 0.0f};
     e.lifetime = 3.0f;

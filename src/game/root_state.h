@@ -86,14 +86,14 @@ inline void to_json(json& j, const WorldEntity& e) {
     j = json{
         {"id", e.id},
         {"type", static_cast<uint8_t>(e.type)},
-        {"ownerId", e.ownerId},
+        {"ownerUUID", e.ownerUUID},
         {"position", e.position},
         {"velocity", e.velocity},
         {"yaw", e.yaw},
         {"lifetime", e.lifetime},
         {"spawnTime", e.spawnTime},
         {"flags", e.flags},
-        {"hitMask", e.hitMask}
+        {"hitUUIDs", e.hitUUIDs}
     };
 
     switch (e.type) {
@@ -132,14 +132,14 @@ inline void to_json(json& j, const WorldEntity& e) {
 inline void from_json(const json& j, WorldEntity& e) {
     e.id = j.at("id").get<uint16_t>();
     e.type = static_cast<EntityType>(j.at("type").get<uint8_t>());
-    e.ownerId = j.at("ownerId").get<uint8_t>();
+    e.ownerUUID = j.at("ownerUUID").get<std::string>();
     e.position = j.at("position").get<Vec3>();
     e.velocity = j.at("velocity").get<Vec3>();
     e.yaw = j.at("yaw").get<float>();
     e.lifetime = j.at("lifetime").get<float>();
     e.spawnTime = j.at("spawnTime").get<float>();
     e.flags = j.at("flags").get<uint8_t>();
-    e.hitMask = j.at("hitMask").get<uint8_t>();
+    if (j.contains("hitUUIDs")) e.hitUUIDs = j.at("hitUUIDs").get<std::unordered_set<std::string>>();
 
     if (j.contains("data")) {
         const auto& d = j.at("data");

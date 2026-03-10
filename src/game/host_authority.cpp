@@ -179,6 +179,27 @@ bool HostAuthority::useItem(const std::string& playerUUID, int slot) {
     return true;
 }
 
+void HostAuthority::processEntityDamage() {
+    if (!m_state || !m_worldState) return;
+
+    // Build player snapshots using UUIDs directly
+    std::vector<PlayerSnapshot> snaps;
+    for (const auto& [uuid, ps] : m_state->players) {
+        if (ps.isDead) continue;
+        if (ps.position.x == 0.0f && ps.position.y == 0.0f && ps.position.z == 0.0f) continue;
+        snaps.push_back({uuid, ps.position, 0.3f, 1.8f});
+    }
+
+    // Run damage detection on all entities
+    for (auto& entity : m_state->entities) {
+        std::vector<DamageEvent> events;
+        m_worldState->processDamageEntity(entity, snaps, events);
+        for (const auto& ev : events) {
+            applyDamage(ev.victimUUID, ev.amount, ev.attackerUUID);
+        }
+    }
+}
+
 void HostAuthority::dropItem(const std::string& playerUUID, int slot, const Vec3& dropPos) {
     if (!m_state || !m_worldState) return;
 

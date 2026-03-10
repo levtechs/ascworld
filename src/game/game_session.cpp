@@ -481,21 +481,20 @@ void GameSession::updateGenerating() {
     }
 }
 
-void GameSession::updatePlaying(float dt) {
-    // Networking update (handles packets, host authority processing, etc.)
+// --- Shared world simulation (runs identically in Playing/Paused/Dead) ---
+std::unordered_set<std::string> GameSession::updateWorld(float dt) {
+    // Networking update (handles packets, host authority processing, broadcasts)
     m_netManager.update(dt, m_activeState);
 
     // Check for host migration (client promoted to host)
     if (m_netManager.wasPromotedToHost()) {
         m_isDiscoverable = true;
         m_activeState.world.hostUUID = m_clientUUID;
-        // Re-bind HostAuthority for the newly promoted host
         m_netManager.hostAuthority().bind(m_activeState, m_worldState, &m_world);
         m_netManager.hostAuthority().setLocalPlayerSync(m_clientUUID,
             [this](const PlayerState& ps) { syncFromPlayerState(ps); });
     }
 
-    // Build set of active (connected) player UUIDs
     auto activePeers = m_netManager.activePeerUUIDs();
 
     // Sync local player state
@@ -506,10 +505,9 @@ void GameSession::updatePlaying(float dt) {
                                    m_localAppearance, combatItem, combatProg);
     }
 
-    auto& ps = m_activeState.players[m_clientUUID];
-
-    // Sync Player object inventory FROM PlayerState (host is authoritative for inventory)
+    // Sync Player inventory from PlayerState (host-authoritative)
     {
+        auto& ps = m_activeState.players[m_clientUUID];
         Inventory& inv = m_player.inventory();
         bool differs = false;
         for (int i = 0; i < 9 && !differs; i++) {
@@ -527,13 +525,35 @@ void GameSession::updatePlaying(float dt) {
         }
     }
 
+    // Advance game time
     m_activeState.world.gameTime += dt;
 
-    // Periodic autosave (all players save so they can resume or take over as host)
+    // Periodic autosave
     m_timeSinceAutoSave += dt;
     if (m_timeSinceAutoSave >= AUTO_SAVE_INTERVAL) {
         m_timeSinceAutoSave = 0.0f;
         doAutoSave();
+    }
+
+    // Entity physics only (movement, lifetime, explosions).
+    // Damage detection is handled by HostAuthority on the host side.
+    std::vector<PlayerSnapshot> snaps;  // empty — not needed since authoritativeDamage is false
+    std::vector<DamageEvent> damageEvents;
+    m_worldState.update(dt, m_activeState.world.gameTime, m_world.colliders(), false, snaps, damageEvents);
+
+    return activePeers;
+}
+
+// --- Per-state updates (only handle input, state transitions, and rendering) ---
+
+void GameSession::updatePlaying(float dt) {
+    auto activePeers = updateWorld(dt);
+    auto& ps = m_activeState.players[m_clientUUID];
+
+    // Death detection: isDead is always set authoritatively by the host.
+    if (ps.isDead && m_state != GameState::Dead) {
+        enterDeath();
+        return;
     }
 
     // Process input
@@ -565,11 +585,10 @@ void GameSession::updatePlaying(float dt) {
 
     // Physics and combat
     m_player.update(m_inputState, dt, m_world.colliders(), m_world.slopes());
-    auto spawned = m_combat.update(m_player, attackPressed, dt, 0);
+    auto spawned = m_combat.update(m_player, attackPressed, dt, m_clientUUID);
     for (auto& e : spawned) {
         e.spawnTime = m_activeState.world.gameTime;
         m_worldState.spawnEntity(e);
-        // If a consumable was used (e.g., flashbang thrown), tell the host to decrement inventory
         if (e.type == EntityType::Projectile) {
             if (auto* pd = std::get_if<ProjectileData>(&e.data)) {
                 if (pd->sourceType == ItemType::Flashbang) {
@@ -577,55 +596,6 @@ void GameSession::updatePlaying(float dt) {
                 }
             }
         }
-    }
-
-    // Build snapshots for damage detection
-    std::vector<PlayerSnapshot> snaps;
-    snaps.push_back({0, m_player.position(), m_player.radius(), m_player.height()});
-    {
-        uint8_t pid = 1;
-        for (const auto& [uid, rps] : m_activeState.players) {
-            if (uid == m_clientUUID) continue;
-            if (activePeers.find(uid) == activePeers.end()) continue;
-            if (rps.isDead) continue;
-            if (rps.position.x == 0.0f && rps.position.y == 0.0f && rps.position.z == 0.0f) continue;
-            snaps.push_back({pid, rps.position, 0.3f, 1.8f});
-            pid++;
-            if (pid >= 8) break;
-        }
-    }
-
-    // World physics and damage detection
-    std::vector<DamageEvent> damageEvents;
-    m_worldState.update(dt, m_activeState.world.gameTime, m_world.colliders(), true, snaps, damageEvents);
-
-    // Process damage events - unified path, no host/client branching!
-    for (const auto& ev : damageEvents) {
-        if (ev.targetId == 0) {
-            // Local player hit - report to host (loopback if we're host)
-            m_netManager.reportDamage(m_clientUUID, ev.amount, m_clientUUID);
-        } else {
-            // Remote player hit - find their UUID
-            uint8_t pid = 1;
-            for (auto& [uid, rps] : m_activeState.players) {
-                if (uid == m_clientUUID) continue;
-                if (activePeers.find(uid) == activePeers.end()) continue;
-                if (rps.isDead) continue;
-                if (rps.position.x == 0.0f && rps.position.y == 0.0f && rps.position.z == 0.0f) continue;
-                if (pid == ev.targetId) {
-                    m_netManager.reportDamage(uid, ev.amount, m_clientUUID);
-                    break;
-                }
-                pid++;
-                if (pid >= 8) break;
-            }
-        }
-    }
-
-    // Death detection: isDead is always set authoritatively by the host.
-    if (ps.isDead && m_state != GameState::Dead) {
-        enterDeath();
-        return;
     }
 
     // Render
@@ -645,22 +615,8 @@ void GameSession::updatePlaying(float dt) {
 }
 
 void GameSession::updatePaused(float dt) {
-    // Keep networking alive while paused
-    m_netManager.update(dt, m_activeState);
-
-    if (m_netManager.wasPromotedToHost()) {
-        m_isDiscoverable = true;
-        m_activeState.world.hostUUID = m_clientUUID;
-        m_netManager.hostAuthority().bind(m_activeState, m_worldState, &m_world);
-        m_netManager.hostAuthority().setLocalPlayerSync(m_clientUUID,
-            [this](const PlayerState& ps) { syncFromPlayerState(ps); });
-    }
-
-    auto activePeersPaused = m_netManager.activePeerUUIDs();
+    auto activePeers = updateWorld(dt);
     auto& ps = m_activeState.players[m_clientUUID];
-
-    // Keep game time advancing (world is still alive - items spin, other players move)
-    m_activeState.world.gameTime += dt;
 
     // Death check
     if (ps.isDead && m_state != GameState::Dead) {
@@ -670,11 +626,9 @@ void GameSession::updatePaused(float dt) {
 
     bool isOnline = m_netManager.isOnline();
     bool isHost = (m_netManager.mode() == NetworkingManager::Mode::Host);
-    // Allow rename in singleplayer (offline) or when host online
     bool canRename = !isOnline || (isHost && isOnline);
     PauseResult pr = m_pauseOverlay.update(m_inputState, isOnline, canRename, m_targetFPS);
     
-    // Update frame time if FPS changed and save to config
     if (m_targetFPS != m_lastSavedFPS) {
         m_targetFrameTime = 1.0f / static_cast<float>(m_targetFPS);
         saveTargetFPS(m_configDir, m_targetFPS);
@@ -685,7 +639,6 @@ void GameSession::updatePaused(float dt) {
         if (m_inputState.focused.load(std::memory_order_relaxed)) resumePlay();
     } else if (pr == PauseResult::RenameWorld) {
         m_activeState.metadata.name = m_pauseOverlay.renameBuffer();
-        // Only update public lobby name if we're online and hosting
         if (isOnline && isHost) {
             m_netManager.makePublic(m_activeState.metadata.name, m_activeState);
         }
@@ -696,7 +649,6 @@ void GameSession::updatePaused(float dt) {
     } else if (pr == PauseResult::Disconnect) {
         m_netManager.disconnect();
         m_isDiscoverable = false;
-        // Remove remote players from state
         for (auto it = m_activeState.players.begin(); it != m_activeState.players.end(); ) {
             if (it->first != m_clientUUID) it = m_activeState.players.erase(it);
             else ++it;
@@ -714,9 +666,9 @@ void GameSession::updatePaused(float dt) {
     }
 
     if (m_state == GameState::Paused) {
-        renderScene(activePeersPaused);
+        renderScene(activePeers);
         m_fb.render();
-        StateSync::renderRemoteNameplates(m_activeState.players, m_clientUUID, activePeersPaused,
+        StateSync::renderRemoteNameplates(m_activeState.players, m_clientUUID, activePeers,
                                            m_camera, m_screenW, m_screenH);
         auto* nearbyPaused = m_worldState.findNearestPickable(m_player.position());
         renderHUD(m_screenW, m_screenH, m_player, m_activeState.world.gameTime, nearbyPaused,
@@ -731,34 +683,10 @@ void GameSession::updatePaused(float dt) {
 }
 
 void GameSession::updateDead(float dt) {
-    // Keep networking alive while dead
-    m_netManager.update(dt, m_activeState);
-
-    if (m_netManager.wasPromotedToHost()) {
-        m_isDiscoverable = true;
-        m_activeState.world.hostUUID = m_clientUUID;
-        m_netManager.hostAuthority().bind(m_activeState, m_worldState, &m_world);
-        m_netManager.hostAuthority().setLocalPlayerSync(m_clientUUID,
-            [this](const PlayerState& ps) { syncFromPlayerState(ps); });
-    }
-
-    auto activePeersDead = m_netManager.activePeerUUIDs();
-    m_activeState.world.gameTime += dt;
+    auto activePeers = updateWorld(dt);
     auto& ps = m_activeState.players[m_clientUUID];
 
-    // Sync Player inventory from PlayerState (so death screen shows cleared inventory)
-    {
-        Inventory& inv = m_player.inventory();
-        inv = Inventory();
-        for (int i = 0; i < 9; i++) {
-            if (ps.inventory[i].type != ItemType::None)
-                inv.getSlot(i) = {ps.inventory[i].type, ps.inventory[i].count};
-        }
-        inv.selectSlot(ps.selectedSlot);
-    }
-
     // Check if we've been respawned (host: via HostAuthority callback, client: via delta)
-    // Either way, isDead goes false and we sync the Player object uniformly.
     if (!ps.isDead && m_state == GameState::Dead) {
         syncFromPlayerState(ps);
         return;
@@ -766,7 +694,6 @@ void GameSession::updateDead(float dt) {
 
     DeathResult dr = m_deathOverlay.update(m_inputState, dt);
     if (dr == DeathResult::Respawn) {
-        // Unified: just request respawn. NetworkingManager routes appropriately.
         m_netManager.requestRespawn(m_clientUUID);
     } else if (dr == DeathResult::ToMenu) {
         if (m_netManager.isOnline()) {
@@ -781,7 +708,7 @@ void GameSession::updateDead(float dt) {
     }
 
     if (m_state == GameState::Dead) {
-        renderScene(activePeersDead);
+        renderScene(activePeers);
         m_fb.applyTint(Color3(1.6f, 0.25f, 0.2f), 0.55f);
         m_fb.render();
         renderHUD(m_screenW, m_screenH, m_player, m_activeState.world.gameTime, nullptr,

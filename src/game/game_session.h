@@ -71,6 +71,10 @@ private:
     void updatePaused(float dt);
     void updateDead(float dt);
 
+    // World simulation (shared across Playing/Paused/Dead — runs regardless of local UI state)
+    // Returns the set of active peer UUIDs for rendering use.
+    std::unordered_set<std::string> updateWorld(float dt);
+
     // Rendering helpers (shared between Playing/Paused/Dead)
     void renderScene(const std::unordered_set<std::string>& activePeers);
     void renderHeldWeapon();

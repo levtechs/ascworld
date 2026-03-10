@@ -135,8 +135,12 @@ void WorldState::updateProjectile(WorldEntity& entity, float dt,
         WorldEntity ex;
         ex.type = EntityType::Explosion;
         ex.ownerId = entity.ownerId;
+        ex.ownerUUID = entity.ownerUUID;
         ex.position = entity.position;
         ex.lifetime = 0.35f;
+        // Derive explosion ID from projectile ID so both host and client
+        // create the same explosion (deduplicated by spawnEntityWithId)
+        ex.id = entity.id ^ 0x4000;  // flip bit 14 to create unique but deterministic ID
         ExplosionData data;
         data.maxRadius = 3.8f;
         data.damage = 42.0f;
@@ -162,8 +166,8 @@ void WorldState::processDamageEntity(WorldEntity& entity,
             if (segLenSq < 1e-4f) return;
 
             for (const auto& p : players) {
-                if (p.peerId == entity.ownerId) continue;
-                if ((entity.hitMask & (1u << p.peerId)) != 0) continue;
+                if (p.uuid == entity.ownerUUID) continue;
+                if (entity.hitUUIDs.count(p.uuid)) continue;
 
                 Vec3 toPlayer = p.position + Vec3(0.0f, p.height * 0.5f, 0.0f) - start;
                 float t = toPlayer.dot(seg) / segLenSq;
@@ -175,12 +179,12 @@ void WorldState::processDamageEntity(WorldEntity& entity,
                 float d = (center - closest).length();
                 if (d <= p.radius + 0.35f) {
                     DamageEvent ev;
-                    ev.sourceId = entity.ownerId;
-                    ev.targetId = p.peerId;
+                    ev.attackerUUID = entity.ownerUUID;
+                    ev.victimUUID = p.uuid;
                     ev.amount = data->damage;
                     ev.weaponType = EntityType::LaserBeam;
                     outDamageEvents.push_back(ev);
-                    entity.hitMask |= static_cast<uint8_t>(1u << p.peerId);
+                    entity.hitUUIDs.insert(p.uuid);
                 }
             }
             break;
@@ -192,8 +196,8 @@ void WorldState::processDamageEntity(WorldEntity& entity,
 
             Vec3 fwd = data->forward.normalized();
             for (const auto& p : players) {
-                if (p.peerId == entity.ownerId) continue;
-                if ((entity.hitMask & (1u << p.peerId)) != 0) continue;
+                if (p.uuid == entity.ownerUUID) continue;
+                if (entity.hitUUIDs.count(p.uuid)) continue;
 
                 Vec3 target = p.position + Vec3(0.0f, p.height * 0.5f, 0.0f);
                 Vec3 to = target - entity.position;
@@ -205,12 +209,12 @@ void WorldState::processDamageEntity(WorldEntity& entity,
                 if (cosA < data->coneCos) continue;
 
                 DamageEvent ev;
-                ev.sourceId = entity.ownerId;
-                ev.targetId = p.peerId;
+                ev.attackerUUID = entity.ownerUUID;
+                ev.victimUUID = p.uuid;
                 ev.amount = data->damage;
                 ev.weaponType = EntityType::SaberSwing;
                 outDamageEvents.push_back(ev);
-                entity.hitMask |= static_cast<uint8_t>(1u << p.peerId);
+                entity.hitUUIDs.insert(p.uuid);
             }
             break;
         }
@@ -226,8 +230,8 @@ void WorldState::processDamageEntity(WorldEntity& entity,
             float radius = data->maxRadius * t;
 
             for (const auto& p : players) {
-                if (p.peerId == entity.ownerId) continue;
-                if ((entity.hitMask & (1u << p.peerId)) != 0) continue;
+                if (p.uuid == entity.ownerUUID) continue;
+                if (entity.hitUUIDs.count(p.uuid)) continue;
 
                 Vec3 center = p.position + Vec3(0.0f, p.height * 0.5f, 0.0f);
                 float d = (center - entity.position).length();
@@ -235,12 +239,12 @@ void WorldState::processDamageEntity(WorldEntity& entity,
 
                 float falloff = 1.0f - std::min(1.0f, d / std::max(0.001f, data->maxRadius));
                 DamageEvent ev;
-                ev.sourceId = entity.ownerId;
-                ev.targetId = p.peerId;
+                ev.attackerUUID = entity.ownerUUID;
+                ev.victimUUID = p.uuid;
                 ev.amount = data->damage * (0.35f + 0.65f * falloff);
                 ev.weaponType = EntityType::Explosion;
                 outDamageEvents.push_back(ev);
-                entity.hitMask |= static_cast<uint8_t>(1u << p.peerId);
+                entity.hitUUIDs.insert(p.uuid);
             }
             break;
         }
@@ -273,7 +277,11 @@ void WorldState::update(float dt, float gameTime, const std::vector<AABB>& colli
 
     for (auto& e : spawnQueue) {
         e.spawnTime = gameTime;
-        spawnEntity(e);
+        if (e.id != 0) {
+            spawnEntityWithId(e);  // deterministic ID — deduplicates across host/client
+        } else {
+            spawnEntity(e);
+        }
     }
 
     m_entities->erase(
