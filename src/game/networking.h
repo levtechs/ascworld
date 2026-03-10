@@ -160,6 +160,8 @@ private:
 
     std::vector<LobbyInfo> m_discoveredLobbies;
 
+    std::unordered_set<std::string> m_processedOffers; // Track processed host offers to avoid retry loops
+
     rtc::Configuration m_rtcConfig;
     std::atomic<bool> m_promotedToHost{false};
     std::atomic<bool> m_heartbeatNeeded{false}; // Set when peer count changes to trigger immediate Firebase update

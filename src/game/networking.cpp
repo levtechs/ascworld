@@ -28,6 +28,7 @@ NetworkingManager::NetworkingManager(const std::string& clientUUID, const std::s
     NETLOG("[NET] NetworkingManager created, uuid=" << clientUUID);
     rtc::InitLogger(rtc::LogLevel::Warning);
     m_rtcConfig.iceServers.emplace_back("stun:stun.l.google.com:19302");
+    m_rtcConfig.iceServers.emplace_back("stun:stun1.l.google.com:19302");
 
     m_signalingThread = std::thread(&NetworkingManager::runSignalingLoop, this);
 }
@@ -554,11 +555,18 @@ void NetworkingManager::handleSignaling() {
                 bool isNew = false;
                 {
                     std::lock_guard<std::mutex> lock(m_peersMutex);
-                    isNew = (m_peers.find(peerUUID) == m_peers.end());
+                    // Consider it new only if we don't have a peer AND we haven't processed an offer from them yet
+                    isNew = (m_peers.find(peerUUID) == m_peers.end()) && (m_processedOffers.find(peerUUID) == m_processedOffers.end());
                 }
                 
                 if (isNew && offerVal.is_string()) {
                     NETLOG("[SIG-H] New peer: " << peerUUID.substr(0,8));
+                    
+                    {
+                        std::lock_guard<std::mutex> lock(m_peersMutex);
+                        m_processedOffers.insert(peerUUID);
+                    }
+                    
                     setupPeer(peerUUID, false);
                     
                     std::lock_guard<std::mutex> lock(m_peersMutex);
@@ -630,13 +638,19 @@ void NetworkingManager::handleSignaling() {
         }
         for (auto& info : peersToCheck) {
             auto candidates = FirebaseClient::get("signaling/" + m_lobbyUUID + "/candidates/" + info.peerUUID);
-            if (candidates.is_array() && (int)candidates.size() > info.startIdx) {
+            if ((candidates.is_array() || candidates.is_object()) && (int)candidates.size() > info.startIdx) {
                 std::lock_guard<std::mutex> lock(m_peersMutex);
                 if (m_peers.find(info.peerUUID) != m_peers.end()) {
                     auto& peer = m_peers[info.peerUUID];
                     for (int i = peer->remoteCandidateIndex; i < (int)candidates.size(); i++) {
                         try {
-                            auto candObj = json::parse(candidates[i].get<std::string>());
+                            std::string candStr;
+                            if (candidates.is_array()) {
+                                candStr = candidates[i].get<std::string>();
+                            } else {
+                                candStr = candidates[std::to_string(i)].get<std::string>();
+                            }
+                            auto candObj = json::parse(candStr);
                             peer->pc->addRemoteCandidate(rtc::Candidate(candObj["candidate"].get<std::string>(), candObj["mid"].get<std::string>()));
                         } catch (const std::exception& e) {
                             NETLOG("[SIG-H] Failed to add candidate: " << e.what());
@@ -665,7 +679,8 @@ void NetworkingManager::handleSignaling() {
             json sigPatch;
             sigPatch["offers/" + m_clientUUID] = offerToSend;
             sigPatch["answers/" + m_clientUUID] = nullptr;
-            sigPatch["candidates/" + m_clientUUID] = nullptr;
+            // Only clear host candidates on offer send so we get a fresh set. 
+            // We do NOT clear our own candidates, as we might have already started generating and pushing them via trickle ICE!
             sigPatch["host_candidates/" + m_clientUUID] = nullptr;
             FirebaseClient::patch("signaling/" + m_lobbyUUID, sigPatch);
             NETLOG("[SIG-C] Offer sent!");
@@ -737,13 +752,19 @@ void NetworkingManager::handleSignaling() {
         }
         if (hasRemoteDesc) {
             auto candidates = FirebaseClient::get("signaling/" + m_lobbyUUID + "/host_candidates/" + m_clientUUID);
-            if (candidates.is_array() && (int)candidates.size() > candStartIdx) {
+            if ((candidates.is_array() || candidates.is_object()) && (int)candidates.size() > candStartIdx) {
                 std::lock_guard<std::mutex> lock(m_peersMutex);
                 if (m_peers.find(m_lobbyUUID) != m_peers.end()) {
                     auto& p = m_peers[m_lobbyUUID];
                     for (int i = p->remoteCandidateIndex; i < (int)candidates.size(); i++) {
                         try {
-                            auto candObj = json::parse(candidates[i].get<std::string>());
+                            std::string candStr;
+                            if (candidates.is_array()) {
+                                candStr = candidates[i].get<std::string>();
+                            } else {
+                                candStr = candidates[std::to_string(i)].get<std::string>();
+                            }
+                            auto candObj = json::parse(candStr);
                             p->pc->addRemoteCandidate(rtc::Candidate(candObj["candidate"].get<std::string>(), candObj["mid"].get<std::string>()));
                         } catch (const std::exception& e) {
                             NETLOG("[SIG] Failed to add candidate: " << e.what());

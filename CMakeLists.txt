@@ -8,6 +8,20 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Allow older CMakeLists in dependencies
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 
+# ---- Dependencies via FetchContent ----
+include(FetchContent)
+
+# libdatachannel (WebRTC DataChannels for P2P multiplayer)
+FetchContent_Declare(
+    libdatachannel
+    GIT_REPOSITORY https://github.com/paullouisageneau/libdatachannel.git
+    GIT_TAG v0.21.2
+)
+# Build as static, disable media/websocket features we don't need
+set(NO_MEDIA ON CACHE BOOL "" FORCE)
+set(NO_WEBSOCKET ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(libdatachannel)
+
 # ---- Main executable ----
 add_executable(ascii3d
     # Entry point
@@ -89,16 +103,7 @@ add_executable(ascii3d
     src/ui/menu/customize_screen.cpp
 )
 
-target_include_directories(ascii3d PRIVATE 
-    src
-    build/_deps/libdatachannel-src/deps/json/include
-    build/_deps/libdatachannel-src/include
-)
-
-# Link libdatachannel
-target_link_libraries(ascii3d PRIVATE
-    ${CMAKE_CURRENT_BINARY_DIR}/_deps/libdatachannel-build/libdatachannel.dylib
-)
+target_include_directories(ascii3d PRIVATE src)
 
 # Link macOS frameworks needed for input (CGEventTap, mouse capture)
 find_library(COREGRAPHICS_FRAMEWORK CoreGraphics)
@@ -108,6 +113,8 @@ target_link_libraries(ascii3d PRIVATE
     ${COREGRAPHICS_FRAMEWORK}
     ${COREFOUNDATION_FRAMEWORK}
     ${APPLICATIONSERVICES_FRAMEWORK}
+    LibDataChannel::LibDataChannelStatic
+    nlohmann_json
 )
 
 # Default to Release if no build type specified (critical for performance —
