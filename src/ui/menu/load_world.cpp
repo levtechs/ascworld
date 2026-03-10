@@ -1,10 +1,10 @@
 #include "ui/menu/load_world.h"
 #include <ctime>
 
-void LoadWorldScreen::setSaves(const std::vector<SaveData>& saves) {
+void LoadWorldScreen::setSaves(const std::vector<SaveSummary>& saves) {
     m_saves = saves;
-    if (m_selected >= (int)m_saves.size())
-        m_selected = m_saves.empty() ? 0 : (int)m_saves.size() - 1;
+    if (m_selected > (int)m_saves.size())
+        m_selected = (int)m_saves.size();
 }
 
 std::string LoadWorldScreen::formatTimestamp(int64_t timestamp) {
@@ -19,14 +19,12 @@ std::string LoadWorldScreen::formatTimestamp(int64_t timestamp) {
 
 MenuResult LoadWorldScreen::update(InputState& input, int /*screenW*/, int /*screenH*/) {
     auto p = consumePressFlags(input);
-    int count = (int)m_saves.size();
+    int totalItems = (int)m_saves.size() + 1; // +1 for New Game
 
-    if (count == 0) return MenuResult::Back;
+    if (p.up)   { m_selected--; if (m_selected < 0) m_selected = totalItems - 1; }
+    if (p.down) { m_selected++; if (m_selected >= totalItems) m_selected = 0; }
 
-    if (p.up)   { m_selected--; if (m_selected < 0) m_selected = count - 1; }
-    if (p.down) { m_selected++; if (m_selected >= count) m_selected = 0; }
-
-    if (p.confirm) return MenuResult::LoadWorld;
+    if (p.confirm) return (m_selected == 0) ? MenuResult::NewGame : MenuResult::LoadWorld;
     if (p.back) return MenuResult::Back;
 
     return MenuResult::None;
@@ -41,39 +39,45 @@ void LoadWorldScreen::render(int screenW, int screenH) const {
     int maxVisible = screenH - 10;
     if (maxVisible < 3) maxVisible = 3;
 
-    int total = (int)m_saves.size();
+    int totalItems = (int)m_saves.size() + 1;
 
     int scrollOffset = 0;
-    if (total > maxVisible) {
+    if (totalItems > maxVisible) {
         scrollOffset = m_selected - maxVisible / 2;
         if (scrollOffset < 0) scrollOffset = 0;
-        if (scrollOffset > total - maxVisible) scrollOffset = total - maxVisible;
+        if (scrollOffset > totalItems - maxVisible) scrollOffset = totalItems - maxVisible;
     }
 
     for (int y = 0; y < screenH; y++) {
         bool rendered = false;
 
         if (y == headerY) {
-            renderCenteredText(output, "=== Load World ===", screenW, TITLE_FG, BG);
+            renderCenteredText(output, "=== Select World ===", screenW, TITLE_FG, BG);
             rendered = true;
         }
 
         int listIdx = y - listStartY;
-        if (y >= listStartY && listIdx < maxVisible && (listIdx + scrollOffset) < total) {
-            int saveIdx = listIdx + scrollOffset;
-            const SaveData& save = m_saves[saveIdx];
-            bool sel = (saveIdx == m_selected);
-
-            std::string nameStr = save.name;
-            if ((int)nameStr.size() > 24) nameStr = nameStr.substr(0, 21) + "...";
-            std::string timeStr = formatTimestamp(save.timestamp);
-
+        if (y >= listStartY && listIdx < maxVisible && (listIdx + scrollOffset) < totalItems) {
+            int itemIdx = listIdx + scrollOffset;
+            bool sel = (itemIdx == m_selected);
+            
             std::string line;
             line = sel ? " > " : "   ";
-            line += nameStr;
-            while ((int)line.size() < 30) line += ' ';
-            line += timeStr;
-            while ((int)line.size() < 52) line += ' ';
+            
+            if (itemIdx == 0) {
+                line += "[ CREATE NEW WORLD ]";
+                while ((int)line.size() < 52) line += ' ';
+            } else {
+                const SaveSummary& save = m_saves[itemIdx - 1];
+                std::string nameStr = save.name;
+                if ((int)nameStr.size() > 24) nameStr = nameStr.substr(0, 21) + "...";
+                std::string timeStr = formatTimestamp(save.timestamp);
+
+                line += nameStr;
+                while ((int)line.size() < 30) line += ' ';
+                line += timeStr;
+                while ((int)line.size() < 52) line += ' ';
+            }
 
             int padLeft = (screenW - (int)line.size()) / 2;
             if (padLeft < 0) padLeft = 0;
@@ -89,8 +93,8 @@ void LoadWorldScreen::render(int screenW, int screenH) const {
         }
 
         // Seed info
-        if (y == listStartY + maxVisible + 1 && !m_saves.empty()) {
-            const SaveData& save = m_saves[m_selected];
+        if (y == listStartY + maxVisible + 1 && m_selected > 0 && !m_saves.empty()) {
+            const SaveSummary& save = m_saves[m_selected - 1];
             char seedInfo[64];
             snprintf(seedInfo, sizeof(seedInfo), "Seed: %u", save.seed);
             renderCenteredText(output, seedInfo, screenW, DETAIL_FG, BG);
@@ -98,7 +102,7 @@ void LoadWorldScreen::render(int screenW, int screenH) const {
         }
 
         if (y == screenH - 2) {
-            renderCenteredText(output, "UP/DOWN: Navigate  |  ENTER: Load  |  ESC: Back",
+            renderCenteredText(output, "UP/DOWN: Navigate  |  ENTER: Select  |  ESC: Back",
                              screenW, HINT_FG, BG);
             rendered = true;
         }

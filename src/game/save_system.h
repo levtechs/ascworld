@@ -1,20 +1,15 @@
 #pragma once
-#include "core/vec_math.h"
+#include "game/root_state.h"
 #include <string>
 #include <vector>
 #include <cstdint>
 
-// Data stored in a save file
-struct SaveData {
-    std::string name;       // World name (display name)
-    uint32_t seed = 0;      // World generation seed
-    Vec3 playerPos;         // Player position
-    float playerYaw = 0.0f;
-    float playerPitch = 0.0f;
-    int64_t timestamp = 0;  // Unix timestamp of last save
-    
-    // Derived/display
-    std::string filename;   // Filename on disk (without path)
+// Summary of a save file for the menu
+struct SaveSummary {
+    std::string name;
+    uint32_t seed;
+    int64_t timestamp;
+    std::string filename;
 };
 
 // Manages saving/loading game state to ~/.ascii3d/saves/
@@ -23,16 +18,16 @@ public:
     SaveSystem();
     
     // Save current game state. Returns true on success.
-    bool save(const SaveData& data);
+    bool save(const RootState& state);
     
     // Load a specific save file by filename. Returns true on success.
-    bool load(const std::string& filename, SaveData& outData);
+    bool load(const std::string& filename, RootState& outState);
     
     // Delete a save file by filename
     bool deleteSave(const std::string& filename);
     
     // Scan for all saved worlds, sorted by timestamp (newest first)
-    std::vector<SaveData> listSaves();
+    std::vector<SaveSummary> listSaves();
     
     // Generate a save filename from a world name
     static std::string makeFilename(const std::string& worldName);

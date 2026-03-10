@@ -1,4 +1,5 @@
 #include "game/save_system.h"
+#include "game/root_state.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -6,6 +7,9 @@
 #include <ctime>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <cerrno>
+
+using json = nlohmann::json;
 
 SaveSystem::SaveSystem() {
     // Determine saves directory: ~/.ascii3d/saves/
@@ -17,70 +21,59 @@ SaveSystem::SaveSystem() {
     }
 }
 
+static bool mkdirRecursive(const std::string& path) {
+    if (path.empty()) return false;
+    struct stat st;
+    if (stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return true;
+    size_t pos = path.rfind('/');
+    if (pos != std::string::npos && pos > 0) {
+        mkdirRecursive(path.substr(0, pos));
+    }
+    return mkdir(path.c_str(), 0755) == 0 || (errno == EEXIST);
+}
+
 bool SaveSystem::ensureDirectory() {
-    // Create ~/.ascii3d/ then ~/.ascii3d/saves/
-    std::string base = m_savesDir.substr(0, m_savesDir.rfind('/'));
-    mkdir(base.c_str(), 0755);
-    mkdir(m_savesDir.c_str(), 0755);
+    mkdirRecursive(m_savesDir);
     
     // Verify it exists
     struct stat st;
     return stat(m_savesDir.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-bool SaveSystem::save(const SaveData& data) {
+bool SaveSystem::save(const RootState& state) {
     if (!ensureDirectory()) return false;
     
-    std::string filename = data.filename.empty() ? makeFilename(data.name) : data.filename;
+    std::string filename = makeFilename(state.metadata.name);
     std::string path = m_savesDir + "/" + filename;
     
-    std::ofstream out(path);
+    std::ofstream out(path, std::ios::binary);
     if (!out.is_open()) return false;
     
-    // Simple text format, one key=value per line
-    out << "name=" << data.name << "\n";
-    out << "seed=" << data.seed << "\n";
-    out << "px=" << data.playerPos.x << "\n";
-    out << "py=" << data.playerPos.y << "\n";
-    out << "pz=" << data.playerPos.z << "\n";
-    out << "yaw=" << data.playerYaw << "\n";
-    out << "pitch=" << data.playerPitch << "\n";
-    
-    int64_t ts = data.timestamp;
-    if (ts == 0) ts = static_cast<int64_t>(std::time(nullptr));
-    out << "timestamp=" << ts << "\n";
-    
-    out.close();
-    return out.good() || !out.fail();
-}
-
-bool SaveSystem::load(const std::string& filename, SaveData& outData) {
-    std::string path = m_savesDir + "/" + filename;
-    std::ifstream in(path);
-    if (!in.is_open()) return false;
-    
-    outData = SaveData{};
-    outData.filename = filename;
-    
-    std::string line;
-    while (std::getline(in, line)) {
-        auto eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        
-        std::string key = line.substr(0, eq);
-        std::string val = line.substr(eq + 1);
-        
-        if (key == "name") outData.name = val;
-        else if (key == "seed") outData.seed = static_cast<uint32_t>(std::stoul(val));
-        else if (key == "px") outData.playerPos.x = std::stof(val);
-        else if (key == "py") outData.playerPos.y = std::stof(val);
-        else if (key == "pz") outData.playerPos.z = std::stof(val);
-        else if (key == "yaw") outData.playerYaw = std::stof(val);
-        else if (key == "pitch") outData.playerPitch = std::stof(val);
-        else if (key == "timestamp") outData.timestamp = std::stoll(val);
+    try {
+        json j = state;
+        std::vector<uint8_t> v = json::to_cbor(j);
+        out.write(reinterpret_cast<const char*>(v.data()), v.size());
+    } catch (...) {
+        return false;
     }
     
-    return !outData.name.empty();
+    return out.good();
+}
+
+bool SaveSystem::load(const std::string& filename, RootState& outState) {
+    std::string path = m_savesDir + "/" + filename;
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open()) return false;
+    
+    try {
+        std::vector<uint8_t> v((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        json j = json::from_cbor(v);
+        outState = j.get<RootState>();
+    } catch (...) {
+        return false;
+    }
+    
+    return true;
 }
 
 bool SaveSystem::deleteSave(const std::string& filename) {
@@ -88,31 +81,36 @@ bool SaveSystem::deleteSave(const std::string& filename) {
     return std::remove(path.c_str()) == 0;
 }
 
-std::vector<SaveData> SaveSystem::listSaves() {
-    std::vector<SaveData> saves;
+std::vector<SaveSummary> SaveSystem::listSaves() {
+    std::vector<SaveSummary> summaries;
     
     DIR* dir = opendir(m_savesDir.c_str());
-    if (!dir) return saves;
+    if (!dir) return summaries;
     
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
-        std::string name = entry->d_name;
+        std::string filename = entry->d_name;
         // Only load .sav files
-        if (name.size() > 4 && name.substr(name.size() - 4) == ".sav") {
-            SaveData data;
-            if (load(name, data)) {
-                saves.push_back(data);
+        if (filename.size() > 4 && filename.substr(filename.size() - 4) == ".sav") {
+            RootState state;
+            if (load(filename, state)) {
+                SaveSummary summary;
+                summary.name = state.metadata.name;
+                summary.seed = state.world.seed;
+                summary.timestamp = state.metadata.timestamp;
+                summary.filename = filename;
+                summaries.push_back(summary);
             }
         }
     }
     closedir(dir);
     
     // Sort by timestamp, newest first
-    std::sort(saves.begin(), saves.end(), [](const SaveData& a, const SaveData& b) {
+    std::sort(summaries.begin(), summaries.end(), [](const SaveSummary& a, const SaveSummary& b) {
         return a.timestamp > b.timestamp;
     });
     
-    return saves;
+    return summaries;
 }
 
 std::string SaveSystem::makeFilename(const std::string& worldName) {

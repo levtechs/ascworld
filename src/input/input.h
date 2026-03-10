@@ -17,6 +17,7 @@ enum class KeyPress {
     KeyE,       // Cycle weapon right
     KeyF,       // Drop item
     KeyG,       // Pick up item
+    KeyR,       // Refresh / misc action
     MouseLeft,  // Left mouse button (attack/use)
     Key1, Key2, Key3, Key4, Key5, Key6, Key7, Key8, Key9, // Direct hotbar select
 };

@@ -3,18 +3,31 @@
 #include <algorithm>
 #include <cmath>
 
+void WorldState::bind(std::vector<WorldEntity>& entities) {
+    m_entities = &entities;
+    m_ownerCounters.fill(0);
+    for (const auto& e : *m_entities) {
+        uint8_t owner = static_cast<uint8_t>((e.id >> 13) & 0x07);
+        uint16_t local = static_cast<uint16_t>(e.id & 0x1FFF);
+        if (owner < m_ownerCounters.size() && local > m_ownerCounters[owner]) {
+            m_ownerCounters[owner] = local;
+        }
+    }
+}
+
 uint16_t WorldState::spawnEntity(const WorldEntity& entity) {
+    if (!m_entities) return 0;
     WorldEntity e = entity;
     uint8_t owner = static_cast<uint8_t>(e.ownerId & 0x07);
     uint16_t local = ++m_ownerCounters[owner];
     e.id = static_cast<uint16_t>((owner << 13) | (local & 0x1FFF));
-    m_entities.push_back(e);
+    m_entities->push_back(e);
     return e.id;
 }
 
 void WorldState::spawnEntityWithId(const WorldEntity& entity) {
-    if (entity.id == 0) return;
-    for (const auto& e : m_entities) {
+    if (!m_entities || entity.id == 0) return;
+    for (const auto& e : *m_entities) {
         if (e.id == entity.id) return;
     }
     uint8_t owner = static_cast<uint8_t>((entity.id >> 13) & 0x07);
@@ -22,25 +35,28 @@ void WorldState::spawnEntityWithId(const WorldEntity& entity) {
     if (owner < m_ownerCounters.size() && local > m_ownerCounters[owner]) {
         m_ownerCounters[owner] = local;
     }
-    m_entities.push_back(entity);
+    m_entities->push_back(entity);
 }
 
 void WorldState::removeEntity(uint16_t id) {
-    m_entities.erase(
-        std::remove_if(m_entities.begin(), m_entities.end(),
+    if (!m_entities) return;
+    m_entities->erase(
+        std::remove_if(m_entities->begin(), m_entities->end(),
             [id](const WorldEntity& e) { return e.id == id; }),
-        m_entities.end());
+        m_entities->end());
 }
 
 WorldEntity* WorldState::findEntity(uint16_t id) {
-    for (auto& e : m_entities) {
+    if (!m_entities) return nullptr;
+    for (auto& e : *m_entities) {
         if (e.id == id) return &e;
     }
     return nullptr;
 }
 
 const WorldEntity* WorldState::findEntity(uint16_t id) const {
-    for (const auto& e : m_entities) {
+    if (!m_entities) return nullptr;
+    for (const auto& e : *m_entities) {
         if (e.id == id) return &e;
     }
     return nullptr;
@@ -60,12 +76,13 @@ uint16_t WorldState::dropItem(ItemType type, int count, const Vec3& pos, float g
 }
 
 bool WorldState::pickupItem(uint16_t id, Inventory& inv) {
-    for (auto it = m_entities.begin(); it != m_entities.end(); ++it) {
+    if (!m_entities) return false;
+    for (auto it = m_entities->begin(); it != m_entities->end(); ++it) {
         if (it->id != id || it->type != EntityType::DroppedItem) continue;
         const auto* data = std::get_if<DroppedItemData>(&it->data);
         if (!data) return false;
         if (inv.addItem(data->itemType, data->count)) {
-            m_entities.erase(it);
+            m_entities->erase(it);
             return true;
         }
         return false;
@@ -74,9 +91,10 @@ bool WorldState::pickupItem(uint16_t id, Inventory& inv) {
 }
 
 const WorldEntity* WorldState::findNearestPickable(const Vec3& playerPos, float maxRange) const {
+    if (!m_entities) return nullptr;
     const WorldEntity* best = nullptr;
     float bestDist = maxRange * maxRange;
-    for (const auto& e : m_entities) {
+    for (const auto& e : *m_entities) {
         if (e.type != EntityType::DroppedItem) continue;
         float dx = e.position.x - playerPos.x;
         float dy = e.position.y - playerPos.y;
@@ -235,9 +253,10 @@ void WorldState::processDamageEntity(WorldEntity& entity,
 void WorldState::update(float dt, float gameTime, const std::vector<AABB>& colliders,
                         bool authoritativeDamage, const std::vector<PlayerSnapshot>& players,
                         std::vector<DamageEvent>& outDamageEvents) {
+    if (!m_entities) return;
     std::vector<WorldEntity> spawnQueue;
 
-    for (auto& e : m_entities) {
+    for (auto& e : *m_entities) {
         if (e.lifetime >= 0.0f) {
             e.lifetime -= dt;
             if (e.lifetime <= 0.0f) e.lifetime = 0.0f;
@@ -257,15 +276,16 @@ void WorldState::update(float dt, float gameTime, const std::vector<AABB>& colli
         spawnEntity(e);
     }
 
-    m_entities.erase(
-        std::remove_if(m_entities.begin(), m_entities.end(),
+    m_entities->erase(
+        std::remove_if(m_entities->begin(), m_entities->end(),
             [](const WorldEntity& e) { return e.lifetime == 0.0f; }),
-        m_entities.end());
+        m_entities->end());
 }
 
 void WorldState::gatherSceneObjects(std::vector<SceneObject>& out,
                                     const WeaponMeshes& weaponMeshes,
                                     float gameTime) const {
+    if (!m_entities) return;
     static Mesh explosionMesh = createSphere(7, 10, 1.0f);
     static bool init = false;
     if (!init) {
@@ -273,7 +293,7 @@ void WorldState::gatherSceneObjects(std::vector<SceneObject>& out,
         init = true;
     }
 
-    for (const auto& e : m_entities) {
+    for (const auto& e : *m_entities) {
         switch (e.type) {
             case EntityType::DroppedItem: {
                 const auto* data = std::get_if<DroppedItemData>(&e.data);
@@ -321,8 +341,9 @@ void WorldState::gatherSceneObjects(std::vector<SceneObject>& out,
 void WorldState::gatherOverlayObjects(std::vector<SceneObject>& out,
                                       const WeaponMeshes& weaponMeshes,
                                       float gameTime) const {
+    if (!m_entities) return;
     (void)gameTime;
-    for (const auto& e : m_entities) {
+    for (const auto& e : *m_entities) {
         if (e.type == EntityType::LaserBeam) {
             const auto* data = std::get_if<LaserBeamData>(&e.data);
             if (!data) continue;
@@ -333,6 +354,6 @@ void WorldState::gatherOverlayObjects(std::vector<SceneObject>& out,
 }
 
 void WorldState::clear() {
-    m_entities.clear();
+    if (m_entities) m_entities->clear();
     m_ownerCounters.fill(0);
 }

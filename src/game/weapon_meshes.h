@@ -29,7 +29,7 @@ public:
     // Get scene objects for third-person weapon (attached to remote player).
     // attackProgress: 0 or negative = idle, 0..1 = attack animation
     std::vector<SceneObject> getThirdPersonObjects(ItemType type, const Vec3& playerPos,
-                                                    float yaw, float attackProgress = 0.0f) const;
+                                                    float yaw, float pitch, float attackProgress = 0.0f) const;
 
     // Get scene objects for a dropped weapon on the ground.
     std::vector<SceneObject> getDroppedObjects(ItemType type, const Vec3& worldPos,

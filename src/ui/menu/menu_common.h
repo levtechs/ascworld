@@ -19,6 +19,8 @@ enum class MenuResult {
     Back,           // Navigate back one screen
     Disconnect,     // Cancel connection / disconnect
     CustomizeChar,  // Open character customization
+    Play,           // Go to Play menu
+    Refresh,        // Refresh lobby list
 };
 
 // ---- Base class for all menu screens ----

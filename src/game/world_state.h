@@ -25,7 +25,8 @@ struct DamageEvent {
 
 class WorldState {
 public:
-    WorldState() = default;
+    WorldState() : m_entities(nullptr) {}
+    void bind(std::vector<WorldEntity>& entities);
 
     uint16_t spawnEntity(const WorldEntity& entity);
     void spawnEntityWithId(const WorldEntity& entity);
@@ -48,7 +49,7 @@ public:
     void gatherOverlayObjects(std::vector<SceneObject>& out, const WeaponMeshes& weaponMeshes,
                               float gameTime) const;
 
-    const std::vector<WorldEntity>& entities() const { return m_entities; }
+    const std::vector<WorldEntity>& entities() const { return *m_entities; }
     void clear();
 
 private:
@@ -57,6 +58,6 @@ private:
     void processDamageEntity(WorldEntity& entity, const std::vector<PlayerSnapshot>& players,
                              std::vector<DamageEvent>& outDamageEvents);
 
-    std::vector<WorldEntity> m_entities;
+    std::vector<WorldEntity>* m_entities;
     std::array<uint16_t, 8> m_ownerCounters{};
 };

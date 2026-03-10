@@ -44,6 +44,17 @@ void installSignalHandlers() {
     sigaction(SIGSEGV, &sa, nullptr);
 }
 
+void getTerminalSize(int& w, int& h) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+        w = 80;
+        h = 24;
+    } else {
+        w = ws.ws_col;
+        h = ws.ws_row;
+    }
+}
+
 // ============================================================
 // CGEventTap: captures both mouse + keyboard at OS level
 // ============================================================
@@ -165,6 +176,7 @@ static CGEventRef eventCallback(CGEventTapProxy, CGEventType type, CGEventRef ev
                 case kVK_ANSI_E:     state->pushPress(KeyPress::KeyE);    break;
                 case kVK_ANSI_F:     state->pushPress(KeyPress::KeyF);    break;
                 case kVK_ANSI_G:     state->pushPress(KeyPress::KeyG);    break;
+                case kVK_ANSI_R:     state->pushPress(KeyPress::KeyR);    break;
                 // Direct hotbar selection (number keys)
                 case kVK_ANSI_1:     state->pushPress(KeyPress::Key1);    break;
                 case kVK_ANSI_2:     state->pushPress(KeyPress::Key2);    break;

@@ -8,25 +8,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Allow older CMakeLists in dependencies
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 
-# ---- Dependencies via FetchContent ----
-include(FetchContent)
-
-# libdatachannel (WebRTC DataChannels for P2P)
-FetchContent_Declare(
-    libdatachannel
-    GIT_REPOSITORY https://github.com/paullouisageneau/libdatachannel.git
-    GIT_TAG v0.21.2
-)
-# Build as static, disable media/websocket features we don't need
-set(NO_MEDIA ON CACHE BOOL "" FORCE)
-set(NO_WEBSOCKET ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(libdatachannel)
-
-# nlohmann/json is bundled with libdatachannel, no separate fetch needed
-
-# libcurl (HTTP client - macOS has it built-in)
-find_package(CURL REQUIRED)
-
 # ---- Main executable ----
 add_executable(ascii3d
     # Entry point
@@ -75,20 +56,21 @@ add_executable(ascii3d
     src/game/weapon_meshes.cpp
     src/game/world_state.cpp
     src/game/combat.cpp
+    src/game/firebase_client.cpp
+    src/game/networking.cpp
+    src/game/state_sync.cpp
+    src/game/host_authority.cpp
+    src/game/game_session.cpp
 
     # Input
     src/input/input.cpp
 
     # UI (menu screens)
     src/ui/menu/menu_common.cpp
-    src/ui/menu/mode_select.cpp
     src/ui/menu/main_menu.cpp
+    src/ui/menu/play_menu.cpp
+    src/ui/menu/lobby_browser.cpp
     src/ui/menu/load_world.cpp
-    src/ui/menu/username.cpp
-    src/ui/menu/lobby.cpp
-    src/ui/menu/host_setup.cpp
-    src/ui/menu/join_password.cpp
-    src/ui/menu/connecting.cpp
     src/ui/menu/generating.cpp
     src/ui/menu/pause_overlay.cpp
 
@@ -105,18 +87,18 @@ add_executable(ascii3d
 
     # UI (Menu - customize)
     src/ui/menu/customize_screen.cpp
-
-    # Network
-    src/network/firebase_client.cpp
-    src/network/signaling.cpp
-    src/network/peer_connection.cpp
-    src/network/remote_player.cpp
-    src/network/host_session.cpp
-    src/network/client_session.cpp
-    src/network/lobby.cpp
 )
 
-target_include_directories(ascii3d PRIVATE src)
+target_include_directories(ascii3d PRIVATE 
+    src
+    build/_deps/libdatachannel-src/deps/json/include
+    build/_deps/libdatachannel-src/include
+)
+
+# Link libdatachannel
+target_link_libraries(ascii3d PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/_deps/libdatachannel-build/libdatachannel.dylib
+)
 
 # Link macOS frameworks needed for input (CGEventTap, mouse capture)
 find_library(COREGRAPHICS_FRAMEWORK CoreGraphics)
@@ -126,9 +108,6 @@ target_link_libraries(ascii3d PRIVATE
     ${COREGRAPHICS_FRAMEWORK}
     ${COREFOUNDATION_FRAMEWORK}
     ${APPLICATIONSERVICES_FRAMEWORK}
-    LibDataChannel::LibDataChannelStatic
-    nlohmann_json
-    CURL::libcurl
 )
 
 # Default to Release if no build type specified (critical for performance —
@@ -138,17 +117,3 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 target_compile_options(ascii3d PRIVATE -O2)
-
-# Read Firebase URL from .env file at configure time and bake it into the binary
-if(EXISTS "${CMAKE_SOURCE_DIR}/.env")
-    file(STRINGS "${CMAKE_SOURCE_DIR}/.env" ENV_LINES)
-    foreach(LINE ${ENV_LINES})
-        if(LINE MATCHES "^FIREBASE_URL=(.+)$")
-            set(FIREBASE_URL "${CMAKE_MATCH_1}")
-        endif()
-    endforeach()
-endif()
-if(NOT FIREBASE_URL)
-    message(FATAL_ERROR "FIREBASE_URL not found in .env file. Create a .env file with FIREBASE_URL=https://your-project.firebaseio.com/")
-endif()
-target_compile_definitions(ascii3d PRIVATE FIREBASE_URL="${FIREBASE_URL}")

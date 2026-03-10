@@ -189,7 +189,7 @@ std::vector<SceneObject> WeaponMeshes::getHeldObjects(
 // Supports attack animations when attackProgress is 0..1.
 // -------------------------------------------------------------------------
 std::vector<SceneObject> WeaponMeshes::getThirdPersonObjects(
-    ItemType type, const Vec3& playerPos, float yaw, float attackProgress) const
+    ItemType type, const Vec3& playerPos, float yaw, float pitch, float attackProgress) const
 {
     std::vector<SceneObject> objs;
     if (type == ItemType::None) return objs;
@@ -197,10 +197,14 @@ std::vector<SceneObject> WeaponMeshes::getThirdPersonObjects(
     // Scale factor for third-person visibility
     constexpr float S = 2.5f;
 
-    // Weapon offset: slightly right, hand height (~0.8m up), clearly in front
+    // Weapon offset: slightly right, hand height (~0.8m up), in front
+    // Negate yaw because player yaw is camera convention (opposite of world rotation)
+    // Apply pitch so weapon tilts with player's look direction
     Mat4 base = Mat4::translate(playerPos)
-              * Mat4::rotateY(yaw)
-              * Mat4::translate(Vec3(0.2f, 0.8f, -0.7f));
+              * Mat4::rotateY(-yaw)
+              * Mat4::translate(Vec3(0.2f, 0.8f, 0.0f))
+              * Mat4::rotateX(pitch)
+              * Mat4::translate(Vec3(0.0f, 0.0f, -0.4f));
 
     switch (type) {
     case ItemType::Saber: {

@@ -2,9 +2,9 @@
 
 std::vector<std::string> MainMenuScreen::getItems() const {
     std::vector<std::string> items;
-    if (m_canContinue) items.push_back("Continue");
-    items.push_back("New Game");
-    if (!m_saves.empty()) items.push_back("Load World");
+    if (m_canContinue) items.push_back("Resume");
+    items.push_back("Play");
+    items.push_back("Customize");
     items.push_back("Quit");
     return items;
 }
@@ -20,14 +20,14 @@ MenuResult MainMenuScreen::update(InputState& input, int /*screenW*/, int /*scre
 
     if (p.confirm && m_selected < count) {
         const std::string& chosen = items[m_selected];
-        if (chosen == "Continue") return MenuResult::Continue;
-        if (chosen == "New Game") return MenuResult::NewGame;
-        if (chosen == "Load World") return MenuResult::LoadWorld;
+        if (chosen == "Resume") return MenuResult::Continue;
+        if (chosen == "Play") return MenuResult::Play;
+        if (chosen == "Customize") return MenuResult::CustomizeChar;
         if (chosen == "Quit") return MenuResult::Quit;
     }
 
     if (p.back) {
-        return MenuResult::Back; // always go back to mode select
+        // In main menu, back does nothing or same as quit
     }
 
     return MenuResult::None;
@@ -83,7 +83,7 @@ void MainMenuScreen::render(int screenW, int screenH) const {
 
         // Hint
         if (y == menuStartY + itemCount + 2) {
-            renderCenteredText(output, "UP/DOWN: Navigate  |  ENTER: Select  |  ESC: Back", screenW, HINT_FG, BG);
+            renderCenteredText(output, "UP/DOWN: Navigate  |  ENTER: Select", screenW, HINT_FG, BG);
             rendered = true;
         }
 

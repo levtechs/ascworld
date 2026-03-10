@@ -21,4 +21,7 @@ void renderHUD(int screenW, int screenH, const Player& player, float gameTime,
                float health = 100.0f,
                float maxHealth = 100.0f,
                int kills = 0,
-               int deaths = 0);
+               int deaths = 0,
+               int netPeerCount = 0,
+               bool isHost = false,
+               const char* worldName = nullptr);

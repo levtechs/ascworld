@@ -1,0 +1,14 @@
+# Target labels
+ libdatachannel-populate
+# Source files and their labels
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/CMakeFiles/libdatachannel-populate
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/CMakeFiles/libdatachannel-populate.rule
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/CMakeFiles/libdatachannel-populate-complete.rule
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/libdatachannel-populate-prefix/src/libdatachannel-populate-stamp/libdatachannel-populate-build.rule
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/libdatachannel-populate-prefix/src/libdatachannel-populate-stamp/libdatachannel-populate-configure.rule
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/libdatachannel-populate-prefix/src/libdatachannel-populate-stamp/libdatachannel-populate-download.rule
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/libdatachannel-populate-prefix/src/libdatachannel-populate-stamp/libdatachannel-populate-install.rule
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/libdatachannel-populate-prefix/src/libdatachannel-populate-stamp/libdatachannel-populate-mkdir.rule
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/libdatachannel-populate-prefix/src/libdatachannel-populate-stamp/libdatachannel-populate-patch.rule
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/libdatachannel-populate-prefix/src/libdatachannel-populate-stamp/libdatachannel-populate-test.rule
+/Users/lev/code/ascii/_deps/libdatachannel-subbuild/libdatachannel-populate-prefix/src/libdatachannel-populate-stamp/libdatachannel-populate-update.rule

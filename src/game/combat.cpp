@@ -122,8 +122,8 @@ void CombatSystem::attackFlashbang(Player& player, std::vector<WorldEntity>& out
     m_attackDuration = 0.25f;
     m_attackTimer = m_attackDuration;
 
-    // Consume one flashbang
-    inv.removeActiveItem(1);
+    // Note: consumable decrement is handled by HostAuthority (via useItem),
+    // not here. The game session calls useItem when it sees a flashbang spawn.
 
     WorldEntity e;
     e.type = EntityType::Projectile;
